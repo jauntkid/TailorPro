@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../services/api_service.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 
 class UserOrder {
   final String orderNumber;
@@ -28,15 +31,19 @@ class UserPage extends StatefulWidget {
 class _UserPageState extends State<UserPage> {
   int _currentNavIndex = 0;
 
-  // Mock user data - in a real app, this would be fetched from the database
-  final Map<String, dynamic> _userData = {
-    'name': 'John Smith',
-    'phoneNumber': '+91 9876543210',
-    'address': '123 Main Street, Bangalore, Karnataka, India',
-    'referral': 'Friend Recommendation',
-    'notes': 'Regular customer, prefers tailored suits.',
+  // Replace mock user data with API data
+  Map<String, dynamic> _userData = {
+    'name': 'Loading...',
+    'phoneNumber': '',
+    'address': '',
+    'referral': '',
+    'notes': '',
     'profileImage': 'https://randomuser.me/api/portraits/men/1.jpg',
   };
+
+  // API service for fetching data
+  final ApiService _apiService = ApiService();
+  bool _isLoadingProfile = true;
 
   // Mock order data
   final List<UserOrder> _orders = List.generate(
@@ -60,6 +67,7 @@ class _UserPageState extends State<UserPage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_scrollListener);
+    _fetchUserProfile();
   }
 
   @override
@@ -86,7 +94,7 @@ class _UserPageState extends State<UserPage> {
     });
 
     // Simulate API call delay
-    await Future.delayed(Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 2));
 
     if (!mounted) return;
 
@@ -116,9 +124,24 @@ class _UserPageState extends State<UserPage> {
   }
 
   void _handleNavTap(int index) {
+    print('Navigation tapped in user_page.dart: $index');
+
+    // Don't navigate if already on the selected page
+    if (index == _currentNavIndex) {
+      print('Already on this page, not navigating');
+      return;
+    }
+
     setState(() {
       _currentNavIndex = index;
     });
+
+    // Get the route from the AppBottomNav
+    final String route = AppBottomNav.getRouteForIndex(index);
+    print('Navigating to route: $route');
+
+    // Navigate to the selected route and clear the navigation stack
+    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
   }
 
   void _navigateBack() {
@@ -135,15 +158,15 @@ class _UserPageState extends State<UserPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.cardBackground,
-        title: Text('Delete Customer', style: AppTheme.headingMedium),
-        content: Text(
+        title: const Text('Delete Customer', style: AppTheme.headingMedium),
+        content: const Text(
             'Are you sure you want to delete this customer? This action cannot be undone.',
             style: AppTheme.bodyRegular),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child:
-                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -153,13 +176,13 @@ class _UserPageState extends State<UserPage> {
               Navigator.pop(context);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
+                const SnackBar(
                   content: Text('Customer deleted'),
                   backgroundColor: AppTheme.accentColor,
                 ),
               );
             },
-            child: Text('Delete'),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -170,6 +193,72 @@ class _UserPageState extends State<UserPage> {
     Navigator.pushNamed(context, '/order_detail');
   }
 
+  // Fetch user profile from API
+  Future<void> _fetchUserProfile() async {
+    setState(() {
+      _isLoadingProfile = true;
+    });
+
+    try {
+      // First try to get user from AuthProvider
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      if (authProvider.userData != null) {
+        setState(() {
+          _userData = {
+            'name': authProvider.userData!['name'] ?? 'Unknown User',
+            'phoneNumber': authProvider.userData!['phone'] ?? '',
+            'address': authProvider.userData!['address'] ?? '',
+            'referral': authProvider.userData!['referral'] ?? '',
+            'notes': authProvider.userData!['notes'] ?? '',
+            'profileImage': authProvider.userData!['profileImage'] ??
+                'https://randomuser.me/api/portraits/men/1.jpg',
+          };
+          _isLoadingProfile = false;
+        });
+        return;
+      }
+
+      // If not available in provider, fetch from API
+      final result = await _apiService.getCurrentUser();
+      print('User profile API response: $result');
+
+      if (result['success'] && result['data'] != null) {
+        final userData = result['data'];
+        setState(() {
+          _userData = {
+            'name': userData['name'] ?? 'Unknown User',
+            'phoneNumber': userData['phone'] ?? '',
+            'address': userData['address'] ?? '',
+            'referral': userData['referral'] ?? '',
+            'notes': userData['notes'] ?? '',
+            'profileImage': userData['profileImage'] ??
+                'https://randomuser.me/api/portraits/men/1.jpg',
+          };
+        });
+      } else {
+        print('Failed to load user profile: ${result['error']}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to load profile. Using cached data.'),
+            backgroundColor: AppTheme.accentColor,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error fetching user profile: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading profile: $e'),
+          backgroundColor: AppTheme.accentColor,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoadingProfile = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -177,18 +266,18 @@ class _UserPageState extends State<UserPage> {
       appBar: AppBar(
         backgroundColor: AppTheme.background,
         elevation: 0,
-        title: Text('Customer Profile', style: AppTheme.headingLarge),
+        title: const Text('Customer Profile', style: AppTheme.headingLarge),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+          icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
           onPressed: _navigateBack,
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.edit, color: AppTheme.textPrimary),
+            icon: const Icon(Icons.edit, color: AppTheme.textPrimary),
             onPressed: _editCustomer,
           ),
           IconButton(
-            icon: Icon(Icons.delete, color: AppTheme.accentColor),
+            icon: const Icon(Icons.delete, color: AppTheme.accentColor),
             onPressed: _deleteCustomer,
           ),
         ],
@@ -200,14 +289,14 @@ class _UserPageState extends State<UserPage> {
 
           // Order history
           Padding(
-            padding: EdgeInsets.symmetric(
+            padding: const EdgeInsets.symmetric(
               horizontal: AppTheme.paddingMedium,
               vertical: AppTheme.paddingSmall,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
+                const Text(
                   'Order History',
                   style: AppTheme.headingMedium,
                 ),
@@ -223,11 +312,11 @@ class _UserPageState extends State<UserPage> {
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
-              padding: EdgeInsets.all(AppTheme.paddingMedium),
+              padding: const EdgeInsets.all(AppTheme.paddingMedium),
               itemCount: _orders.length + (_hasMoreOrders ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _orders.length) {
-                  return Center(
+                  return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(AppTheme.paddingMedium),
                       child: CircularProgressIndicator(
@@ -252,52 +341,68 @@ class _UserPageState extends State<UserPage> {
 
   Widget _buildUserProfileCard() {
     return Container(
-      margin: EdgeInsets.all(AppTheme.paddingMedium),
-      padding: EdgeInsets.all(AppTheme.paddingMedium),
+      margin: const EdgeInsets.symmetric(
+        horizontal: AppTheme.paddingMedium,
+        vertical: AppTheme.paddingSmall,
+      ),
+      padding: const EdgeInsets.all(AppTheme.paddingMedium),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
-        borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
-      ),
-      child: Column(
-        children: [
-          // Profile image and name
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 40,
-                backgroundImage: NetworkImage(_userData['profileImage']),
-              ),
-              SizedBox(width: AppTheme.paddingMedium),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _userData['name'],
-                      style: AppTheme.headingMedium,
-                    ),
-                    SizedBox(height: 4),
-                    _buildInfoRow(Icons.phone, _userData['phoneNumber']),
-                  ],
-                ),
-              ),
-            ],
+        borderRadius: BorderRadius.circular(AppTheme.borderRadiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-
-          SizedBox(height: AppTheme.paddingMedium),
-          Divider(color: AppTheme.dividerColor),
-          SizedBox(height: AppTheme.paddingMedium),
-
-          // Other details
-          _buildInfoRow(Icons.location_on, _userData['address']),
-          SizedBox(height: AppTheme.paddingSmall),
-
-          _buildInfoRow(Icons.people, 'Referral: ${_userData['referral']}'),
-          SizedBox(height: AppTheme.paddingSmall),
-
-          _buildInfoRow(Icons.note, _userData['notes']),
         ],
       ),
+      child: _isLoadingProfile
+          ? const Center(
+              child: CircularProgressIndicator(color: AppTheme.primary),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Profile image and name
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 40,
+                      backgroundImage: NetworkImage(_userData['profileImage']),
+                    ),
+                    const SizedBox(width: AppTheme.paddingMedium),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _userData['name'],
+                            style: AppTheme.headingMedium,
+                          ),
+                          const SizedBox(height: 4),
+                          _buildInfoRow(Icons.phone, _userData['phoneNumber']),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: AppTheme.paddingMedium),
+                const Divider(color: AppTheme.dividerColor),
+                const SizedBox(height: AppTheme.paddingMedium),
+
+                // Other details
+                _buildInfoRow(Icons.location_on, _userData['address']),
+                const SizedBox(height: AppTheme.paddingSmall),
+
+                _buildInfoRow(
+                    Icons.people, 'Referral: ${_userData['referral']}'),
+                const SizedBox(height: AppTheme.paddingSmall),
+
+                _buildInfoRow(Icons.note, _userData['notes']),
+              ],
+            ),
     );
   }
 
@@ -310,7 +415,7 @@ class _UserPageState extends State<UserPage> {
           size: 18,
           color: AppTheme.textSecondary,
         ),
-        SizedBox(width: 8),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
@@ -323,7 +428,7 @@ class _UserPageState extends State<UserPage> {
 
   Widget _buildOrderCard(UserOrder order) {
     return Container(
-      margin: EdgeInsets.only(bottom: AppTheme.paddingMedium),
+      margin: const EdgeInsets.only(bottom: AppTheme.paddingMedium),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
         borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
@@ -334,7 +439,7 @@ class _UserPageState extends State<UserPage> {
           borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
           onTap: _navigateToOrderDetail,
           child: Padding(
-            padding: EdgeInsets.all(AppTheme.paddingMedium),
+            padding: const EdgeInsets.all(AppTheme.paddingMedium),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -349,7 +454,7 @@ class _UserPageState extends State<UserPage> {
                   ],
                 ),
 
-                SizedBox(height: AppTheme.paddingSmall),
+                const SizedBox(height: AppTheme.paddingSmall),
 
                 // Order details
                 Row(
@@ -396,7 +501,7 @@ class _UserPageState extends State<UserPage> {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.paddingMedium,
         vertical: 4,
       ),

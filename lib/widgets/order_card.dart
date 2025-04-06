@@ -26,7 +26,7 @@ class OrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.only(bottom: AppTheme.paddingMedium),
+      margin: const EdgeInsets.only(bottom: AppTheme.paddingMedium),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
         borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
@@ -37,7 +37,7 @@ class OrderCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
           onTap: onTap,
           child: Padding(
-            padding: EdgeInsets.all(AppTheme.paddingMedium),
+            padding: const EdgeInsets.all(AppTheme.paddingMedium),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -51,24 +51,31 @@ class OrderCard extends StatelessWidget {
                     _buildStatusBadge(status),
                   ],
                 ),
-                SizedBox(height: AppTheme.paddingSmall),
+                const SizedBox(height: AppTheme.paddingSmall),
                 Text(
                   orderNumber,
                   style: AppTheme.bodySmall,
                 ),
-                SizedBox(height: AppTheme.paddingSmall),
+                const SizedBox(height: AppTheme.paddingSmall),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '$items • Due $dueDate',
-                      style: AppTheme.bodySmall,
-                    ),
-                    Text(
-                      '$currencySymbol${price.toStringAsFixed(2)}',
-                      style: AppTheme.bodyLarge,
+                    Expanded(
+                      child: Text(
+                        '$items • Due $dueDate',
+                        style: AppTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$currencySymbol${price.toStringAsFixed(2)}',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                    fontSize: 16,
+                  ),
                 ),
               ],
             ),
@@ -101,7 +108,7 @@ class OrderCard extends StatelessWidget {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.paddingMedium,
         vertical: 4,
       ),

@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 
+class NavItem {
+  final String label;
+  final IconData icon;
+  final String route;
+
+  NavItem({
+    required this.label,
+    required this.icon,
+    required this.route,
+  });
+}
+
 class AppBottomNav extends StatelessWidget {
   final int currentIndex;
   final Function(int) onTap;
@@ -11,93 +23,118 @@ class AppBottomNav extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
+  // Define navigation items with their routes
+  static final List<NavItem> _navItems = [
+    NavItem(
+      label: 'Home',
+      icon: Icons.home,
+      route: '/',
+    ),
+    NavItem(
+      label: 'Customers',
+      icon: Icons.people,
+      route: '/customers',
+    ),
+    NavItem(
+      label: 'Track',
+      icon: Icons.track_changes,
+      route: '/track',
+    ),
+    NavItem(
+      label: 'Settings',
+      icon: Icons.settings,
+      route: '/settings',
+    ),
+  ];
+
+  // Get route name for a specific index
+  static String getRouteForIndex(int index) {
+    if (index >= 0 && index < _navItems.length) {
+      return _navItems[index].route;
+    }
+    return '/';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            spreadRadius: 0,
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
         border: Border(
-          top: BorderSide(color: AppTheme.border.withOpacity(0.1), width: 1),
+          top: BorderSide(
+            width: 1,
+            color: Colors.grey.withOpacity(0.1),
+          ),
         ),
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 20.0,
+            vertical: 8.0,
+          ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(
+              _navItems.length,
+              (index) => _buildNavItem(
                 context,
-                0,
-                Icons.home_outlined,
-                Icons.home_filled,
-                'Home',
+                icon: _navItems[index].icon,
+                label: _navItems[index].label,
+                isSelected: currentIndex == index,
+                onTap: () => onTap(index),
               ),
-              _buildNavItem(
-                context,
-                1,
-                Icons.person_outline,
-                Icons.person,
-                'Analytics',
-              ),
-              _buildNavItem(
-                context,
-                2,
-                Icons.calendar_today_outlined,
-                Icons.calendar_today,
-                'Calendar',
-              ),
-              _buildNavItem(
-                context,
-                3,
-                Icons.tune_outlined,
-                Icons.tune,
-                'Settings',
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildNavItem(BuildContext context, int index, IconData iconOutlined,
-      IconData iconFilled, String label) {
-    final bool isSelected = currentIndex == index;
-
-    return GestureDetector(
-      onTap: () {
-        switch (label) {
-          case 'Calendar':
-            Navigator.pushNamed(context, '/track');
-            break;
-          case 'Analytics':
-            Navigator.pushNamed(context, '/user_page');
-            break;
-          case 'Settings':
-            Navigator.pushNamed(context, '/preset');
-            break;
-          default:
-            Navigator.pushNamed(context, '/');
-          //onTap(index);
-        }
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+  Widget _buildNavItem(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12.0,
+          vertical: 8.0,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isSelected
+              ? AppTheme.primary.withOpacity(0.1)
+              : Colors.transparent,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              isSelected ? iconFilled : iconOutlined,
+              icon,
               color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
               size: 24,
             ),
             const SizedBox(height: 4),
             Text(
               label,
-              style: AppTheme.tabLabel.copyWith(
+              style: TextStyle(
                 color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
               ),
             ),
           ],

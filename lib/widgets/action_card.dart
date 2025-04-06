@@ -40,12 +40,12 @@ class ActionCard extends StatelessWidget {
                       title,
                       style: AppTheme.headingMedium,
                     ),
-                    SizedBox(height: AppTheme.paddingMedium),
+                    const SizedBox(height: AppTheme.paddingMedium),
                     Opacity(
                       opacity: 0.75,
                       child: Text(
                         subtitle,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 14,
                           fontFamily: 'Inter',

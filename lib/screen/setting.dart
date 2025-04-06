@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../config/theme.dart';
+import '../services/api_service.dart';
 import '../widgets/app_bottom_nav.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingOption {
   final IconData icon;
@@ -26,433 +30,536 @@ class PresetScreen extends StatefulWidget {
 }
 
 class _PresetScreenState extends State<PresetScreen> {
-  int _currentNavIndex = 3; // Settings is typically the last tab
-  String _selectedTheme = 'Dark';
-  String _selectedCurrency = 'INR (₹)';
-  bool _isLoggedIn = true;
+  final int _currentNavIndex = 3;
+  bool _isLoading = false;
+  final ApiService _apiService = ApiService();
 
-  // Default pricing values
-  final Map<String, double> _defaultPricing = {
-    'Shirt': 499.00,
-    'Pant': 699.00,
-    'Suit': 2999.00,
-    'Blouse': 799.00,
-    'Saree': 599.00,
-  };
+  // Business details
+  final TextEditingController _businessNameController =
+      TextEditingController(text: 'Siri Tailors');
+  final TextEditingController _businessAddressController =
+      TextEditingController(text: '123 Fashion St, Mumbai, India');
+  final TextEditingController _businessPhoneController =
+      TextEditingController(text: '+91 9876543210');
+  final TextEditingController _businessEmailController =
+      TextEditingController(text: 'contact@siritailors.com');
+  final TextEditingController _businessWebsiteController =
+      TextEditingController(text: 'www.siritailors.com');
+  final TextEditingController _googleMapsLinkController =
+      TextEditingController(text: 'https://goo.gl/maps/example123');
+
+  @override
+  void dispose() {
+    _businessNameController.dispose();
+    _businessAddressController.dispose();
+    _businessPhoneController.dispose();
+    _businessEmailController.dispose();
+    _businessWebsiteController.dispose();
+    _googleMapsLinkController.dispose();
+    super.dispose();
+  }
 
   void _handleNavTap(int index) {
+    print('Navigation tapped in setting.dart: $index');
+
+    // Don't navigate if already on the selected page
+    if (index == _currentNavIndex) {
+      print('Already on this page, not navigating');
+      return;
+    }
+
+    // Get the route from the AppBottomNav
+    final String route = AppBottomNav.getRouteForIndex(index);
+    print('Navigating to route: $route');
+
+    // Navigate to the selected route and clear the navigation stack
+    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
+  }
+
+  Future<void> _logOut() async {
     setState(() {
-      _currentNavIndex = index;
-    });
-  }
-
-  void _showThemeSelector() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.cardBackground,
-        title: Text('Select Theme', style: AppTheme.headingMedium),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildThemeOption('Dark', 'Dark mode (Default)'),
-            _buildThemeOption('Light', 'Light mode'),
-            _buildThemeOption('System', 'Follow system settings'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child:
-                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildThemeOption(String theme, String description) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Radio<String>(
-        value: theme,
-        groupValue: _selectedTheme,
-        activeColor: AppTheme.primary,
-        onChanged: (value) {
-          setState(() {
-            _selectedTheme = value!;
-          });
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Theme changed to $value'),
-              backgroundColor: AppTheme.statusInProgress,
-            ),
-          );
-        },
-      ),
-      title: Text(theme, style: AppTheme.bodyLarge),
-      subtitle: Text(description, style: AppTheme.bodySmall),
-    );
-  }
-
-  void _showCurrencySelector() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.cardBackground,
-        title: Text('Select Currency', style: AppTheme.headingMedium),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildCurrencyOption('INR (₹)', 'Indian Rupee (Default)'),
-            _buildCurrencyOption('USD (\$)', 'US Dollar'),
-            _buildCurrencyOption('EUR (€)', 'Euro'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child:
-                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCurrencyOption(String currency, String description) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Radio<String>(
-        value: currency,
-        groupValue: _selectedCurrency,
-        activeColor: AppTheme.primary,
-        onChanged: (value) {
-          setState(() {
-            _selectedCurrency = value!;
-          });
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Currency changed to $value'),
-              backgroundColor: AppTheme.statusInProgress,
-            ),
-          );
-        },
-      ),
-      title: Text(currency, style: AppTheme.bodyLarge),
-      subtitle: Text(description, style: AppTheme.bodySmall),
-    );
-  }
-
-  void _showPricingEditor() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.cardBackground,
-        title: Text('Default Pricing', style: AppTheme.headingMedium),
-        content: Container(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _defaultPricing.length,
-            itemBuilder: (context, index) {
-              String key = _defaultPricing.keys.elementAt(index);
-              return Padding(
-                padding: EdgeInsets.only(bottom: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: Text(key, style: AppTheme.bodyLarge),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        style: AppTheme.bodyRegular,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          prefixText: '₹ ',
-                          prefixStyle: AppTheme.bodyRegular,
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: AppTheme.borderColor),
-                            borderRadius: BorderRadius.circular(
-                                AppTheme.borderRadiusSmall),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: AppTheme.primary),
-                            borderRadius: BorderRadius.circular(
-                                AppTheme.borderRadiusSmall),
-                          ),
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        controller: TextEditingController(
-                            text: _defaultPricing[key]!.toStringAsFixed(2)),
-                        onChanged: (value) {
-                          if (value.isNotEmpty) {
-                            _defaultPricing[key] =
-                                double.tryParse(value) ?? _defaultPricing[key]!;
-                          }
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child:
-                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Pricing updated'),
-                  backgroundColor: AppTheme.statusInProgress,
-                ),
-              );
-            },
-            child: Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _toggleLogin() {
-    setState(() {
-      _isLoggedIn = !_isLoggedIn;
+      _isLoading = true;
     });
 
-    if (_isLoggedIn) {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.logout();
+      Navigator.pushReplacementNamed(context, '/login');
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Logged in successfully'),
-          backgroundColor: AppTheme.statusInProgress,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Logged out successfully'),
+          content: Text('Error logging out: $e'),
           backgroundColor: AppTheme.accentColor,
         ),
       );
-
-      // In a real app, you would navigate to the login screen
-      // Navigator.pushReplacementNamed(context, '/login');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
-  void _showUserInfoEditor() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+  Future<void> _saveBusinessDetails() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // In a real app, this would save to API/backend
+      await Future.delayed(const Duration(seconds: 1)); // Simulating API call
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Business details saved successfully'),
+          backgroundColor: AppTheme.statusInProgress,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving details: $e'),
+          backgroundColor: AppTheme.accentColor,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _launchGoogleMaps() async {
+    final String mapsUrl = _googleMapsLinkController.text;
+    if (await canLaunch(mapsUrl)) {
+      await launch(mapsUrl);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open Google Maps'),
+          backgroundColor: AppTheme.accentColor,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final userData = authProvider.userData ?? {};
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
         backgroundColor: AppTheme.cardBackground,
-        title: Text('Edit Business Info', style: AppTheme.headingMedium),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        elevation: 0,
+        title: const Text(
+          'Settings & Profile',
+          style: AppTheme.headingMedium,
+        ),
+        centerTitle: true,
+      ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppTheme.primary))
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(AppTheme.paddingMedium),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // User profile section
+                  _buildProfileSection(userData),
+                  const SizedBox(height: 24),
+
+                  // Business details section
+                  const Text(
+                    'Business Details',
+                    style: AppTheme.headingMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildBusinessDetailsForm(),
+                  const SizedBox(height: 24),
+
+                  // Business QR Code
+                  _buildBusinessQRCode(),
+                  const SizedBox(height: 24),
+
+                  // Google Maps location
+                  _buildGoogleMapsSection(),
+                  const SizedBox(height: 24),
+
+                  // Settings options
+                  _buildSettingsOptions(),
+                  const SizedBox(height: 24),
+
+                  // Log out button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _logOut,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accentColor,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Log Out',
+                        style: AppTheme.buttonLarge,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+      bottomNavigationBar: AppBottomNav(
+        currentIndex: _currentNavIndex,
+        onTap: _handleNavTap,
+      ),
+    );
+  }
+
+  Widget _buildProfileSection(Map<String, dynamic> userData) {
+    return Card(
+      color: AppTheme.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
           children: [
-            TextField(
-              style: AppTheme.bodyRegular,
-              decoration: InputDecoration(
-                labelText: 'Business Name',
-                labelStyle: AppTheme.bodySmall,
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.borderColor),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
+            // Profile image
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppTheme.primary,
+                  width: 2,
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primary),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
-              controller: TextEditingController(text: 'Siri Tailors'),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(50),
+                child: Image.network(
+                  userData['profileImage'] ??
+                      'https://randomuser.me/api/portraits/men/32.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: AppTheme.primary.withOpacity(0.2),
+                      child: const Icon(
+                        Icons.person,
+                        color: AppTheme.primary,
+                        size: 50,
+                      ),
+                    );
+                  },
+                ),
+              ),
             ),
-            SizedBox(height: 16),
-            TextField(
-              style: AppTheme.bodyRegular,
-              decoration: InputDecoration(
-                labelText: 'Contact Number',
-                labelStyle: AppTheme.bodySmall,
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.borderColor),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primary),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-              controller: TextEditingController(text: '+91 9876543210'),
+            const SizedBox(height: 16),
+
+            // User details
+            Text(
+              userData['name'] ?? 'Tailor User',
+              style: AppTheme.headingLarge,
+              textAlign: TextAlign.center,
             ),
-            SizedBox(height: 16),
-            TextField(
+            const SizedBox(height: 4),
+            Text(
+              userData['role'] ?? 'User',
+              style: AppTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              userData['email'] ?? 'user@example.com',
               style: AppTheme.bodyRegular,
-              decoration: InputDecoration(
-                labelText: 'Address',
-                labelStyle: AppTheme.bodySmall,
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.borderColor),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              userData['phone'] ?? '+91 9876543210',
+              style: AppTheme.bodyRegular,
+            ),
+            const SizedBox(height: 16),
+
+            // Edit profile button
+            OutlinedButton(
+              onPressed: () {
+                // Navigate to edit profile page
+              },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppTheme.primary),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primary),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
-              controller: TextEditingController(text: '123 Main St, Bangalore'),
-              maxLines: 2,
+              child: const Text(
+                'Edit Profile',
+                style: TextStyle(color: AppTheme.primary),
+              ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child:
-                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Business info updated'),
-                  backgroundColor: AppTheme.statusInProgress,
+      ),
+    );
+  }
+
+  Widget _buildBusinessDetailsForm() {
+    return Card(
+      color: AppTheme.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildTextField(
+                _businessNameController, 'Business Name', Icons.business),
+            const SizedBox(height: 16),
+            _buildTextField(_businessAddressController, 'Business Address',
+                Icons.location_on),
+            const SizedBox(height: 16),
+            _buildTextField(
+                _businessPhoneController, 'Business Phone', Icons.phone),
+            const SizedBox(height: 16),
+            _buildTextField(
+                _businessEmailController, 'Business Email', Icons.email),
+            const SizedBox(height: 16),
+            _buildTextField(
+                _businessWebsiteController, 'Business Website', Icons.web),
+            const SizedBox(height: 24),
+
+            // Save button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saveBusinessDetails,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              );
+                child: Text(
+                  'Save Business Details',
+                  style: AppTheme.bodyRegular.copyWith(color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBusinessQRCode() {
+    return Card(
+      color: AppTheme.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              'Business QR Code',
+              style: AppTheme.headingMedium,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              // QR code would be generated here based on business details
+              // For demo purposes, using a placeholder
+              child: const Center(
+                child: Icon(
+                  Icons.qr_code_2,
+                  size: 150,
+                  color: Colors.black,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Scan to visit our digital storefront',
+              style: AppTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                // Share QR code
+              },
+              icon: const Icon(Icons.share),
+              label: const Text('Share QR Code'),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppTheme.primary),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoogleMapsSection() {
+    return Card(
+      color: AppTheme.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Business Location',
+              style: AppTheme.headingMedium,
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+                _googleMapsLinkController, 'Google Maps Link', Icons.map),
+            const SizedBox(height: 16),
+            Container(
+              height: 150,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: AppTheme.cardBackground.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: AppTheme.textSecondary.withOpacity(0.3)),
+              ),
+              // A placeholder for Google Maps preview
+              child: Center(
+                child: Icon(
+                  Icons.map,
+                  size: 80,
+                  color: AppTheme.textSecondary.withOpacity(0.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _launchGoogleMaps,
+                icon: const Icon(Icons.location_on),
+                label: const Text('Open in Google Maps'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsOptions() {
+    return Card(
+      color: AppTheme.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          _buildSettingItem(
+            'App Theme',
+            'Dark',
+            Icons.brightness_6,
+            () {
+              // Change theme logic
             },
-            child: Text('Save'),
+          ),
+          const Divider(height: 1, color: AppTheme.dividerColor),
+          _buildSettingItem(
+            'Notifications',
+            'On',
+            Icons.notifications,
+            () {
+              // Notification settings
+            },
+          ),
+          const Divider(height: 1, color: AppTheme.dividerColor),
+          _buildSettingItem(
+            'Language',
+            'English',
+            Icons.language,
+            () {
+              // Language settings
+            },
+          ),
+          const Divider(height: 1, color: AppTheme.dividerColor),
+          _buildSettingItem(
+            'Currency',
+            '₹ INR',
+            Icons.currency_rupee,
+            () {
+              // Currency settings
+            },
           ),
         ],
       ),
     );
   }
 
-  List<SettingOption> get _settingOptions => [
-        SettingOption(
-          icon: Icons.color_lens,
-          title: 'Theme',
-          subtitle: '$_selectedTheme Mode',
-          trailing: Icon(Icons.arrow_forward_ios,
-              size: 16, color: AppTheme.textSecondary),
-          onTap: _showThemeSelector,
-        ),
-        SettingOption(
-          icon: Icons.currency_rupee,
-          title: 'Currency',
-          subtitle: _selectedCurrency,
-          trailing: Icon(Icons.arrow_forward_ios,
-              size: 16, color: AppTheme.textSecondary),
-          onTap: _showCurrencySelector,
-        ),
-        SettingOption(
-          icon: Icons.monetization_on,
-          title: 'Default Pricing',
-          subtitle: 'Set default prices for items',
-          trailing: Icon(Icons.arrow_forward_ios,
-              size: 16, color: AppTheme.textSecondary),
-          onTap: _showPricingEditor,
-        ),
-        SettingOption(
-          icon: Icons.business,
-          title: 'Business Info',
-          subtitle: 'Edit your business details',
-          trailing: Icon(Icons.arrow_forward_ios,
-              size: 16, color: AppTheme.textSecondary),
-          onTap: _showUserInfoEditor,
-        ),
-        SettingOption(
-          icon: _isLoggedIn ? Icons.logout : Icons.login,
-          title: _isLoggedIn ? 'Logout' : 'Login',
-          subtitle: _isLoggedIn
-              ? 'Sign out of your account'
-              : 'Sign in to your account',
-          onTap: _toggleLogin,
-        ),
-      ];
+  Widget _buildSettingItem(
+      String title, String value, IconData icon, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon, color: AppTheme.textSecondary),
+      title: Text(title, style: AppTheme.bodyRegular),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: AppTheme.bodySmall),
+          const SizedBox(width: 8),
+          const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        title: Text('Settings', style: AppTheme.headingLarge),
+  Widget _buildTextField(
+      TextEditingController controller, String label, IconData icon) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(8),
       ),
-      body: SafeArea(
-        child: ListView.separated(
-          padding: EdgeInsets.all(AppTheme.paddingMedium),
-          itemCount: _settingOptions.length,
-          separatorBuilder: (context, index) => Divider(
-            color: AppTheme.dividerColor,
-            height: 1,
-          ),
-          itemBuilder: (context, index) {
-            final option = _settingOptions[index];
-            return ListTile(
-              contentPadding: EdgeInsets.symmetric(
-                vertical: AppTheme.paddingSmall,
-                horizontal: AppTheme.paddingMedium,
-              ),
-              leading: Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.cardBackground,
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                child: Icon(
-                  option.icon,
-                  color: option.title == 'Logout'
-                      ? AppTheme.accentColor
-                      : AppTheme.primary,
-                ),
-              ),
-              title: Text(
-                option.title,
-                style: AppTheme.bodyLarge,
-              ),
-              subtitle: Text(
-                option.subtitle,
-                style: AppTheme.bodySmall,
-              ),
-              trailing: option.trailing,
-              onTap: option.onTap,
-            );
-          },
+      child: TextField(
+        controller: controller,
+        style: AppTheme.bodyRegular,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: AppTheme.textSecondary),
+          prefixIcon: Icon(icon, color: AppTheme.textSecondary),
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
         ),
-      ),
-      bottomNavigationBar: AppBottomNav(
-        currentIndex: _currentNavIndex,
-        onTap: _handleNavTap,
       ),
     );
   }

@@ -16,6 +16,7 @@ class OrderStatus {
 }
 
 class TrackOrder {
+  final String id;
   final String customerName;
   final String customerImage;
   final String orderNumber;
@@ -25,6 +26,7 @@ class TrackOrder {
   final String status;
 
   TrackOrder({
+    required this.id,
     required this.customerName,
     required this.customerImage,
     required this.orderNumber,
@@ -43,7 +45,8 @@ class TrackScreen extends StatefulWidget {
 }
 
 class _TrackScreenState extends State<TrackScreen> {
-  int _currentNavIndex = 0;
+  // Initialize current nav index to 2 (Track)
+  int _currentNavIndex = 2;
 
   final List<OrderStatus> _filterStatuses = [
     OrderStatus(
@@ -72,6 +75,7 @@ class _TrackScreenState extends State<TrackScreen> {
   final List<TrackOrder> _orders = List.generate(
       5,
       (index) => TrackOrder(
+            id: 'order_${index + 1}',
             customerName: 'Customer ${index + 1}',
             customerImage:
                 'https://randomuser.me/api/portraits/${index % 2 == 0 ? "men" : "women"}/${index + 1}.jpg',
@@ -122,7 +126,7 @@ class _TrackScreenState extends State<TrackScreen> {
     });
 
     // Simulate API call delay
-    await Future.delayed(Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 2));
 
     if (!mounted) return;
 
@@ -132,6 +136,7 @@ class _TrackScreenState extends State<TrackScreen> {
       _orders.addAll(List.generate(
           5,
           (index) => TrackOrder(
+                id: 'order_${currentLength + index + 1}',
                 customerName: 'Customer ${currentLength + index + 1}',
                 customerImage:
                     'https://randomuser.me/api/portraits/${(currentLength + index) % 2 == 0 ? "men" : "women"}/${(currentLength + index) % 10 + 1}.jpg',
@@ -159,9 +164,24 @@ class _TrackScreenState extends State<TrackScreen> {
   }
 
   void _handleNavTap(int index) {
+    print('Navigation tapped in track.dart: $index');
+
+    // Don't navigate if already on the selected page
+    if (index == _currentNavIndex) {
+      print('Already on this page, not navigating');
+      return;
+    }
+
     setState(() {
       _currentNavIndex = index;
     });
+
+    // Get the route from the AppBottomNav
+    final String route = AppBottomNav.getRouteForIndex(index);
+    print('Navigating to route: $route');
+
+    // Navigate to the selected route and clear the navigation stack
+    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
   }
 
   void _filterByStatus(String? status) {
@@ -210,17 +230,17 @@ class _TrackScreenState extends State<TrackScreen> {
 
             // Title and filters
             Padding(
-              padding: EdgeInsets.all(AppTheme.paddingMedium),
+              padding: const EdgeInsets.all(AppTheme.paddingMedium),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Title
-                  Text(
+                  const Text(
                     'Order Tracking',
                     style: AppTheme.headingLarge,
                   ),
 
-                  SizedBox(height: AppTheme.paddingLarge),
+                  const SizedBox(height: AppTheme.paddingLarge),
 
                   // Status filters
                   SizedBox(
@@ -228,7 +248,8 @@ class _TrackScreenState extends State<TrackScreen> {
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: _filterStatuses.length,
-                      separatorBuilder: (context, index) => SizedBox(width: 12),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 12),
                       itemBuilder: (context, index) {
                         final status = _filterStatuses[index];
                         final isSelected =
@@ -240,7 +261,7 @@ class _TrackScreenState extends State<TrackScreen> {
                           selectedColor:
                               status.backgroundColor.withOpacity(0.8),
                           side: status.label == 'Urgent'
-                              ? BorderSide(color: const Color(0xFFDC2626))
+                              ? const BorderSide(color: Color(0xFFDC2626))
                               : BorderSide.none,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9999),
@@ -269,13 +290,13 @@ class _TrackScreenState extends State<TrackScreen> {
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
-                padding:
-                    EdgeInsets.symmetric(horizontal: AppTheme.paddingMedium),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.paddingMedium),
                 itemCount: _filteredOrders.length +
                     (_hasMoreOrders && _selectedStatusFilter == null ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index == _filteredOrders.length) {
-                    return Center(
+                    return const Center(
                       child: Padding(
                         padding: EdgeInsets.all(AppTheme.paddingMedium),
                         child: CircularProgressIndicator(
@@ -301,7 +322,7 @@ class _TrackScreenState extends State<TrackScreen> {
 
   Widget _buildOrderCard(TrackOrder order) {
     return Container(
-      margin: EdgeInsets.only(bottom: AppTheme.paddingMedium),
+      margin: const EdgeInsets.only(bottom: AppTheme.paddingMedium),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground,
         borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
@@ -311,10 +332,14 @@ class _TrackScreenState extends State<TrackScreen> {
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
           onTap: () {
-            Navigator.pushNamed(context, '/order_detail');
+            Navigator.pushNamed(
+              context,
+              '/order_detail',
+              arguments: {'id': order.id},
+            );
           },
           child: Padding(
-            padding: EdgeInsets.all(AppTheme.paddingMedium),
+            padding: const EdgeInsets.all(AppTheme.paddingMedium),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -326,7 +351,7 @@ class _TrackScreenState extends State<TrackScreen> {
                       radius: 16,
                       backgroundImage: NetworkImage(order.customerImage),
                     ),
-                    SizedBox(width: AppTheme.paddingSmall),
+                    const SizedBox(width: AppTheme.paddingSmall),
 
                     // Customer name and order number
                     Expanded(
@@ -346,28 +371,38 @@ class _TrackScreenState extends State<TrackScreen> {
                   ],
                 ),
 
-                SizedBox(height: AppTheme.paddingSmall),
+                const SizedBox(height: AppTheme.paddingSmall),
 
                 Text(
                   order.orderNumber,
                   style: AppTheme.bodySmall,
                 ),
 
-                SizedBox(height: AppTheme.paddingSmall),
+                const SizedBox(height: AppTheme.paddingSmall),
 
                 // Order details
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '${order.items} • Due ${order.dueDate}',
-                      style: AppTheme.bodySmall,
-                    ),
-                    Text(
-                      '₹${order.price.toStringAsFixed(2)}',
-                      style: AppTheme.bodyLarge,
+                    Expanded(
+                      child: Text(
+                        '${order.items} • Due ${order.dueDate}',
+                        style: AppTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // Price on a new line
+                Text(
+                  '₹${order.price.toStringAsFixed(2)}',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                    fontSize: 16,
+                  ),
                 ),
               ],
             ),
@@ -404,7 +439,7 @@ class _TrackScreenState extends State<TrackScreen> {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.paddingMedium,
         vertical: 4,
       ),

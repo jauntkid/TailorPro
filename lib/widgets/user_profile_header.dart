@@ -19,27 +19,69 @@ class UserProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.all(AppTheme.paddingMedium),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.paddingMedium,
+        AppTheme.paddingSmall,
+        AppTheme.paddingMedium,
+        AppTheme.paddingMedium,
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           GestureDetector(
-            onTap: onProfileTap,
+            onTap: () {
+              onProfileTap();
+            },
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundImage: NetworkImage(profileImageUrl),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white,
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Image.network(
+                      profileImageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: AppTheme.primary.withOpacity(0.2),
+                          child: const Icon(
+                            Icons.person,
+                            color: AppTheme.primary,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ),
-                SizedBox(width: AppTheme.paddingMedium),
+                const SizedBox(width: AppTheme.paddingMedium),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'Welcome,',
+                      style: AppTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 4),
                     Text(
-                      'Hey, $name',
+                      name,
                       style: AppTheme.headingMedium,
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       role,
                       style: AppTheme.bodySmall,
@@ -49,12 +91,15 @@ class UserProfileHeader extends StatelessWidget {
               ],
             ),
           ),
+          const Spacer(),
           IconButton(
             onPressed: onNotificationTap,
-            icon: Icon(
+            icon: const Icon(
               Icons.notifications_outlined,
               color: AppTheme.textPrimary,
             ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
           ),
         ],
       ),
