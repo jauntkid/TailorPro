@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../widgets/user_profile_header.dart';
+import '../services/api_service.dart';
+import 'dart:async';
 
 class OrderStatus {
   final String label;
@@ -44,7 +46,7 @@ class TrackScreen extends StatefulWidget {
   State<TrackScreen> createState() => _TrackScreenState();
 }
 
-class _TrackScreenState extends State<TrackScreen> {
+class _TrackScreenState extends State<TrackScreen> with WidgetsBindingObserver {
   // Initialize current nav index to 2 (Track)
   int _currentNavIndex = 2;
 
@@ -71,96 +73,118 @@ class _TrackScreenState extends State<TrackScreen> {
     ),
   ];
 
-  // Initial list of orders - showing 5 at first
-  final List<TrackOrder> _orders = List.generate(
-      5,
-      (index) => TrackOrder(
-            id: 'order_${index + 1}',
-            customerName: 'Customer ${index + 1}',
-            customerImage:
-                'https://randomuser.me/api/portraits/${index % 2 == 0 ? "men" : "women"}/${index + 1}.jpg',
-            orderNumber: '#ORD-2025${100 + index}',
-            items:
-                '${(index % 3) + 1} ${(index % 3) + 1 == 1 ? "Item" : "Items"}',
-            dueDate: 'Jan ${15 + (index % 15)}',
-            price: 149.00 + (index * 50.0),
-            status: index % 4 == 0
-                ? 'Ready'
-                : (index % 4 == 1
-                    ? 'In Progress'
-                    : (index % 4 == 2 ? 'Urgent' : 'New')),
-          ));
+  // Replace mock orders with real data
+  final List<TrackOrder> _orders = [];
 
   String? _selectedStatusFilter;
   final ScrollController _scrollController = ScrollController();
   bool _isLoadingMore = false;
   bool _hasMoreOrders = true;
+  bool _isInitialLoading = true;
+  int _currentPage = 1;
+  final ApiService _apiService = ApiService();
+  DateTime? _lastRefreshTime;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_scrollListener);
+    _fetchOrders();
+    _lastRefreshTime = DateTime.now();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _scrollListener() {
-    if (!_isLoadingMore &&
-        _hasMoreOrders &&
-        _scrollController.position.pixels >=
-            _scrollController.position.maxScrollExtent - 200) {
-      _loadMoreOrders();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Check if it's been more than 30 seconds since the last refresh
+      final now = DateTime.now();
+      if (_lastRefreshTime == null ||
+          now.difference(_lastRefreshTime!).inSeconds > 30) {
+        print('Track screen resumed, refreshing orders');
+        _refreshOrders();
+      }
     }
   }
 
-  Future<void> _loadMoreOrders() async {
+  Future<void> _fetchOrders() async {
     if (!mounted) return;
 
     setState(() {
-      _isLoadingMore = true;
-    });
-
-    // Simulate API call delay
-    await Future.delayed(const Duration(seconds: 2));
-
-    if (!mounted) return;
-
-    // Add 5 more mock orders
-    setState(() {
-      final int currentLength = _orders.length;
-      _orders.addAll(List.generate(
-          5,
-          (index) => TrackOrder(
-                id: 'order_${currentLength + index + 1}',
-                customerName: 'Customer ${currentLength + index + 1}',
-                customerImage:
-                    'https://randomuser.me/api/portraits/${(currentLength + index) % 2 == 0 ? "men" : "women"}/${(currentLength + index) % 10 + 1}.jpg',
-                orderNumber: '#ORD-2025${100 + currentLength + index}',
-                items:
-                    '${((currentLength + index) % 3) + 1} ${((currentLength + index) % 3) + 1 == 1 ? "Item" : "Items"}',
-                dueDate: 'Jan ${15 + ((currentLength + index) % 15)}',
-                price: 149.00 + ((currentLength + index) * 50.0),
-                status: (currentLength + index) % 4 == 0
-                    ? 'Ready'
-                    : ((currentLength + index) % 4 == 1
-                        ? 'In Progress'
-                        : ((currentLength + index) % 4 == 2
-                            ? 'Urgent'
-                            : 'New')),
-              )));
-
-      _isLoadingMore = false;
-
-      // Stop loading more after reaching a certain number
-      if (_orders.length > 50) {
-        _hasMoreOrders = false;
+      if (_currentPage == 1) {
+        _isInitialLoading = true;
+      } else {
+        _isLoadingMore = true;
       }
     });
+
+    try {
+      // Call your API service to get orders
+      final response = await _apiService.getOrders(page: _currentPage);
+
+      if (!mounted) return;
+
+      setState(() {
+        if (_currentPage == 1) {
+          _orders.clear();
+        }
+
+        // Map API response to TrackOrder objects
+        final List<dynamic> ordersData = response['orders'] ?? [];
+
+        for (var orderData in ordersData) {
+          final items = orderData['items'] ?? [];
+          final customer = orderData['customer'] ?? {};
+
+          _orders.add(TrackOrder(
+            id: orderData['_id'] ?? '',
+            customerName: customer['name'] ?? 'Unknown Customer',
+            customerImage: customer['image'] ??
+                'https://randomuser.me/api/portraits/men/1.jpg',
+            orderNumber: '#${orderData['orderNumber'] ?? ''}',
+            items: '${items.length} ${items.length == 1 ? "Item" : "Items"}',
+            dueDate: orderData['dueDate'] ?? 'No due date',
+            price: double.tryParse('${orderData['totalAmount']}') ?? 0.0,
+            status: orderData['status'] ?? 'New',
+          ));
+        }
+
+        _isInitialLoading = false;
+        _isLoadingMore = false;
+        _hasMoreOrders = ordersData.length > 0;
+        _currentPage++;
+      });
+    } catch (e) {
+      print('Error fetching orders: $e');
+      if (!mounted) return;
+
+      setState(() {
+        _isInitialLoading = false;
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  Future<void> _refreshOrders() async {
+    print('Refreshing orders in Track screen...');
+    _lastRefreshTime = DateTime.now();
+    _currentPage = 1;
+    _hasMoreOrders = true;
+    await _fetchOrders();
+  }
+
+  void _loadMoreOrders() {
+    if (!_isLoadingMore && _hasMoreOrders) {
+      _fetchOrders();
+    }
   }
 
   void _handleNavTap(int index) {
@@ -212,111 +236,125 @@ class _TrackScreenState extends State<TrackScreen> {
     // Implement notification functionality
   }
 
+  void _scrollListener() {
+    if (!_isLoadingMore &&
+        _hasMoreOrders &&
+        _scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 200) {
+      _loadMoreOrders();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            // User profile header
-            UserProfileHeader(
-              name: 'James',
-              role: 'Master Tailor',
-              profileImageUrl: 'https://randomuser.me/api/portraits/men/32.jpg',
-              onProfileTap: _navigateToProfile,
-              onNotificationTap: _showNotifications,
-            ),
-
-            // Title and filters
-            Padding(
-              padding: const EdgeInsets.all(AppTheme.paddingMedium),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Title
-                  const Text(
-                    'Order Tracking',
-                    style: AppTheme.headingLarge,
-                  ),
-
-                  const SizedBox(height: AppTheme.paddingLarge),
-
-                  // Status filters
-                  SizedBox(
-                    height: 40,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _filterStatuses.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        final status = _filterStatuses[index];
-                        final isSelected =
-                            _selectedStatusFilter == status.label;
-
-                        return FilterChip(
-                          selected: isSelected,
-                          backgroundColor: status.backgroundColor,
-                          selectedColor:
-                              status.backgroundColor.withOpacity(0.8),
-                          side: status.label == 'Urgent'
-                              ? const BorderSide(color: Color(0xFFDC2626))
-                              : BorderSide.none,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(9999),
-                          ),
-                          label: Text(
-                            status.label,
-                            style: TextStyle(
-                              color: status.textColor,
-                              fontSize: 12,
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                          onSelected: (selected) {
-                            _filterByStatus(status.label);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Order list with infinite scrolling
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppTheme.paddingMedium),
-                itemCount: _filteredOrders.length +
-                    (_hasMoreOrders && _selectedStatusFilter == null ? 1 : 0),
-                itemBuilder: (context, index) {
-                  if (index == _filteredOrders.length) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(AppTheme.paddingMedium),
-                        child: CircularProgressIndicator(
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    );
-                  }
-
-                  return _buildOrderCard(_filteredOrders[index]);
-                },
-              ),
-            ),
-          ],
+        child: RefreshIndicator(
+          onRefresh: _refreshOrders,
+          child: _buildContent(),
         ),
       ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _currentNavIndex,
         onTap: _handleNavTap,
       ),
+    );
+  }
+
+  Widget _buildContent() {
+    return Column(
+      children: [
+        // User profile header
+        UserProfileHeader(
+          name: 'James',
+          role: 'Master Tailor',
+          profileImageUrl: 'https://randomuser.me/api/portraits/men/32.jpg',
+          onProfileTap: _navigateToProfile,
+          onNotificationTap: _showNotifications,
+        ),
+
+        // Title and filters
+        Padding(
+          padding: const EdgeInsets.all(AppTheme.paddingMedium),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title
+              const Text(
+                'Order Tracking',
+                style: AppTheme.headingLarge,
+              ),
+
+              const SizedBox(height: AppTheme.paddingLarge),
+
+              // Status filters
+              SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _filterStatuses.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final status = _filterStatuses[index];
+                    final isSelected = _selectedStatusFilter == status.label;
+
+                    return FilterChip(
+                      selected: isSelected,
+                      backgroundColor: status.backgroundColor,
+                      selectedColor: status.backgroundColor.withOpacity(0.8),
+                      side: status.label == 'Urgent'
+                          ? const BorderSide(color: Color(0xFFDC2626))
+                          : BorderSide.none,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(9999),
+                      ),
+                      label: Text(
+                        status.label,
+                        style: TextStyle(
+                          color: status.textColor,
+                          fontSize: 12,
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      onSelected: (selected) {
+                        _filterByStatus(status.label);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Order list with infinite scrolling
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppTheme.paddingMedium),
+            itemCount: _filteredOrders.length +
+                (_hasMoreOrders && _selectedStatusFilter == null ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == _filteredOrders.length) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(AppTheme.paddingMedium),
+                    child: CircularProgressIndicator(
+                      color: AppTheme.primary,
+                    ),
+                  ),
+                );
+              }
+
+              return _buildOrderCard(_filteredOrders[index]);
+            },
+          ),
+        ),
+      ],
     );
   }
 

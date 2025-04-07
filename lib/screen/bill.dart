@@ -47,8 +47,9 @@ class BillScreen extends StatefulWidget {
   State<BillScreen> createState() => _BillScreenState();
 }
 
-class _BillScreenState extends State<BillScreen> {
+class _BillScreenState extends State<BillScreen> with WidgetsBindingObserver {
   int _currentNavIndex = 0;
+  bool shouldRefresh = false;
 
   // Order data
   String _orderId = '';
@@ -86,8 +87,37 @@ class _BillScreenState extends State<BillScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _orderDate = DateTime.now().toString().split(' ')[0];
     // Don't call _fetchOrderDetails here
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Refresh order details when app is resumed and shouldRefresh is true
+      if (shouldRefresh && _orderId.isNotEmpty) {
+        print('App resumed with shouldRefresh flag, refreshing bill data');
+        _refreshOrderDetails();
+      }
+    }
+  }
+
+  void _refreshOrderDetails() {
+    if (_orderId.isNotEmpty) {
+      print('Refreshing order details for ID: $_orderId');
+      setState(() {
+        // Clear existing bill items to avoid duplication
+        _billItems.clear();
+      });
+      _fetchOrderDetails();
+    }
   }
 
   @override
@@ -95,6 +125,15 @@ class _BillScreenState extends State<BillScreen> {
     super.didChangeDependencies();
     // Fetch order details after dependencies are ready
     if (!_detailsFetched) {
+      final dynamic args = ModalRoute.of(context)!.settings.arguments;
+      print('Bill screen argument type: ${args.runtimeType}');
+      print('Bill screen arguments: $args');
+
+      if (args is Map<String, dynamic>) {
+        shouldRefresh = args['shouldRefresh'] ?? false;
+        print('Should refresh flag set to: $shouldRefresh');
+      }
+
       _fetchOrderDetails();
       _detailsFetched = true;
     }
@@ -138,13 +177,18 @@ class _BillScreenState extends State<BillScreen> {
     final dynamic args = ModalRoute.of(context)!.settings.arguments;
     String? orderId;
 
+    print('Bill screen argument type: ${args.runtimeType}');
+    print('Bill screen arguments: $args');
+
     if (args is String) {
       orderId = args;
     } else if (args is Map<String, dynamic>) {
       orderId = args['orderId'];
+      shouldRefresh = args['shouldRefresh'] ?? false;
     }
 
-    print('Fetching order details for ID: $orderId');
+    print(
+        'Fetching order details for ID: $orderId, shouldRefresh: $shouldRefresh');
 
     if (orderId != null) {
       // Store the order ID for later use
@@ -730,7 +774,9 @@ class _BillScreenState extends State<BillScreen> {
     print('Navigating to route: $route');
 
     // Navigate to the selected route and clear the navigation stack
-    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
+    // Also pass the refresh flag to ensure orders are refreshed
+    Navigator.pushNamedAndRemoveUntil(context, route, (r) => false,
+        arguments: {'shouldRefresh': true});
   }
 
   void _navigateToProfile() {
@@ -870,7 +916,8 @@ Please complete the payment. Thank you for your business!
       },
     ).then((_) {
       // Refresh bill details when returning from edit screen
-      _fetchOrderDetails();
+      shouldRefresh = true;
+      _refreshOrderDetails();
     });
   }
 
@@ -880,8 +927,14 @@ Please complete the payment. Thank you for your business!
 
     print('Navigating to order detail with ID: $orderIdToUse');
 
-    // Navigate to order detail screen with ID directly as a string parameter
-    Navigator.pushNamed(context, '/order_detail', arguments: orderIdToUse);
+    // Navigate to order detail screen with ID and refresh flag
+    Navigator.pushNamed(context, '/order_detail', arguments: {
+      'id': orderIdToUse,
+      'shouldRefresh': true, // Ensure order details are refreshed
+    }).then((_) {
+      // Refresh the bill when returning from order detail
+      _refreshOrderDetails();
+    });
   }
 
   // Add this method to mark order as paid and completed

@@ -240,20 +240,31 @@ const createOrder = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const updateOrder = asyncHandler(async (req, res) => {
+    console.log('=== UPDATE ORDER REQUEST ===');
+    console.log('Order ID:', req.params.id);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
     const { items, status, dueDate, priority, notes, photos } = req.body;
 
     let order = await Order.findById(req.params.id);
 
     if (!order) {
+        console.log('Order not found');
         throw new ErrorResponse(`Order not found with id of ${req.params.id}`, 404);
     }
 
+    console.log('Found existing order:', JSON.stringify(order, null, 2));
+
     // Validate items if provided
     if (items && items.length > 0) {
+        console.log('\nProcessing items:', items.length);
         // Validate each item
         for (const item of items) {
+            console.log('\nProcessing item:', JSON.stringify(item, null, 2));
+
             // Check if product exists
             const product = await Product.findById(item.product);
+            console.log('Found product:', product ? product._id : 'Not found');
 
             if (!product) {
                 throw new ErrorResponse(`Product not found with id of ${item.product}`, 404);
@@ -262,12 +273,17 @@ const updateOrder = asyncHandler(async (req, res) => {
             // If measurement is provided, check if it exists and belongs to the customer
             if (item.measurements) {
                 const measurement = await Measurement.findById(item.measurements);
+                console.log('Found measurement:', measurement ? measurement._id : 'Not found');
 
                 if (!measurement) {
                     throw new ErrorResponse(`Measurement not found with id of ${item.measurements}`, 404);
                 }
 
                 if (measurement.customer.toString() !== order.customer.toString()) {
+                    console.log('Measurement customer mismatch:', {
+                        measurementCustomer: measurement.customer,
+                        orderCustomer: order.customer
+                    });
                     throw new ErrorResponse(`Measurement does not belong to the customer`, 400);
                 }
             }
@@ -275,28 +291,52 @@ const updateOrder = asyncHandler(async (req, res) => {
             // Set price from product if not provided
             if (!item.price) {
                 item.price = product.price;
+                console.log('Set price from product:', item.price);
             }
         }
+
+        // Calculate totalAmount
+        const totalAmount = items.reduce((total, item) => {
+            return total + (item.price * (item.quantity || 1));
+        }, 0);
+        console.log('Calculated total amount:', totalAmount);
+
+        // Update order with new items and total
+        order.items = items;
+        order.totalAmount = totalAmount;
     }
 
-    // Update order
-    order = await Order.findByIdAndUpdate(
-        req.params.id,
-        {
-            items: items || order.items,
-            status: status || order.status,
-            dueDate: dueDate || order.dueDate,
-            priority: priority || order.priority,
-            notes: notes || order.notes,
-            photos: photos || order.photos,
-            updatedBy: req.user.id
-        },
-        {
-            new: true,
-            runValidators: true
-        }
-    )
-        .populate('customer', 'name phone')
+    // Update other fields if provided
+    if (status) {
+        console.log('Updating status:', status);
+        order.status = status;
+    }
+    if (dueDate) {
+        console.log('Updating due date:', dueDate);
+        order.dueDate = dueDate;
+    }
+    if (priority) {
+        console.log('Updating priority:', priority);
+        order.priority = priority;
+    }
+    if (notes !== undefined) {
+        console.log('Updating notes');
+        order.notes = notes;
+    }
+    if (photos) {
+        console.log('Updating photos');
+        order.photos = photos;
+    }
+    order.updatedBy = req.user.id;
+
+    console.log('\nSaving updated order:', JSON.stringify(order, null, 2));
+
+    // Save the updated order
+    await order.save();
+
+    // Populate fields for response
+    const populatedOrder = await Order.findById(order._id)
+        .populate('customer', 'name phone email address')
         .populate({
             path: 'items.product',
             select: 'name price category',
@@ -305,12 +345,15 @@ const updateOrder = asyncHandler(async (req, res) => {
                 select: 'title'
             }
         })
+        .populate('items.measurements')
         .populate('createdBy', 'name')
         .populate('updatedBy', 'name');
 
+    console.log('\nFinal populated order:', JSON.stringify(populatedOrder, null, 2));
+
     res.status(200).json({
         success: true,
-        data: order
+        data: populatedOrder
     });
 });
 

@@ -22,6 +22,18 @@ const orderItemSchema = new mongoose.Schema({
     notes: {
         type: String,
     },
+    deadline: {
+        type: Date,
+        required: [true, 'Please add a deadline for this item'],
+    },
+    status: {
+        type: String,
+        enum: ['New', 'In Progress', 'Ready', 'Urgent', 'Completed', 'Cancelled'],
+        default: 'New',
+    },
+    completedAt: {
+        type: Date,
+    },
 });
 
 const orderSchema = new mongoose.Schema(

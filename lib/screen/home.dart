@@ -49,7 +49,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Initialize the current nav index to 0 (Home)
   int _currentNavIndex = 0;
   final TextEditingController _searchController = TextEditingController();
@@ -61,20 +61,37 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentPage = 1; // For pagination (if supported by your API)
 
   final ScrollController _scrollController = ScrollController();
+  DateTime? _lastRefreshTime;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchOrders(); // Fetch initial orders from API
     _scrollController.addListener(_scrollListener);
+    _lastRefreshTime = DateTime.now();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Check if it's been more than 30 seconds since the last refresh
+      final now = DateTime.now();
+      if (_lastRefreshTime == null ||
+          now.difference(_lastRefreshTime!).inSeconds > 30) {
+        print('App resumed, refreshing orders');
+        _refreshOrders();
+      }
+    }
   }
 
   void _scrollListener() {
@@ -494,7 +511,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToNewOrder() {
-    Navigator.pushNamed(context, '/new_order');
+    Navigator.pushNamed(context, '/new_order').then((_) {
+      // Refresh orders when returning from new order screen
+      _refreshOrders();
+    });
   }
 
   void _navigateToOrderDetail(HomeOrder order) {
@@ -503,7 +523,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       '/order_detail',
       arguments: {'id': order.id},
-    );
+    ).then((_) {
+      // Refresh orders when returning from order detail
+      _refreshOrders();
+    });
   }
 
   void _navigateToProfile() {
@@ -576,6 +599,15 @@ class _HomeScreenState extends State<HomeScreen> {
       // Refresh orders list
       _fetchOrders();
     }
+  }
+
+  // Method to manually refresh orders
+  Future<void> _refreshOrders() async {
+    print('Refreshing orders...');
+    _lastRefreshTime = DateTime.now();
+    _currentPage = 1;
+    _hasMoreOrders = true;
+    await _fetchOrders();
   }
 
   @override

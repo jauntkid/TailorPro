@@ -352,7 +352,20 @@ class ApiService {
   Future<Map<String, dynamic>> getOrder(String orderId) async {
     try {
       print('Fetching order details for ID: $orderId');
-      final response = await _get('/orders/$orderId');
+
+      // Handle any query parameters in the orderId
+      String endpoint = '/orders/';
+      if (orderId.contains('?')) {
+        final parts = orderId.split('?');
+        endpoint += parts[0];
+        endpoint += '?' + parts[1];
+      } else {
+        endpoint += orderId;
+        // Add a timestamp to prevent caching
+        endpoint += '?t=${DateTime.now().millisecondsSinceEpoch}';
+      }
+
+      final response = await _get(endpoint);
       print('API response for order: $response');
 
       // Check if we have a successful response
@@ -466,12 +479,270 @@ class ApiService {
 
   Future<Map<String, dynamic>> createOrder(
       Map<String, dynamic> orderData) async {
-    return await _post('/orders', body: orderData);
+    try {
+      print('Creating new order with total: ${orderData['totalAmount']}');
+
+      // Format items to ensure proper structure
+      if (orderData.containsKey('items') && orderData['items'] is List) {
+        List<dynamic> items = orderData['items'];
+        List<dynamic> formattedItems = [];
+
+        for (int i = 0; i < items.length; i++) {
+          var item = items[i];
+          Map<String, dynamic> formattedItem = Map<String, dynamic>.from(item);
+
+          // Handle product ID
+          if (item.containsKey('product')) {
+            if (item['product'] is Map) {
+              formattedItem['product'] = item['product']['_id'];
+            } else if (item['product'] is String) {
+              formattedItem['product'] = item['product'];
+            }
+          }
+
+          // Handle measurements - create a new measurement document first
+          if (item.containsKey('measurements') && item['measurements'] is Map) {
+            try {
+              // Create a new measurement document
+              final measurementData = {
+                'customer': orderData['customer'],
+                'category': item['product'] is Map
+                    ? item['product']['category']['_id']
+                    : null,
+                'values': item['measurements'],
+                'notes': item['notes'] ?? '',
+              };
+
+              final measurementResponse =
+                  await _post('/measurements', body: measurementData);
+
+              if (measurementResponse['success'] == true &&
+                  measurementResponse['data'] != null) {
+                // Use the new measurement ID
+                formattedItem['measurements'] =
+                    measurementResponse['data']['_id'];
+              } else {
+                print(
+                    'Failed to create measurement: ${measurementResponse['error']}');
+                formattedItem['measurements'] = null;
+              }
+            } catch (e) {
+              print('Error creating measurement: $e');
+              formattedItem['measurements'] = null;
+            }
+          }
+
+          // Remove any extra fields that shouldn't be sent to the API
+          formattedItem.remove('productName');
+          formattedItem.remove('productDescription');
+
+          // Ensure required fields
+          if (!formattedItem.containsKey('quantity')) {
+            formattedItem['quantity'] = 1;
+          }
+          if (!formattedItem.containsKey('price')) {
+            formattedItem['price'] = 0.0;
+          }
+
+          formattedItems.add(formattedItem);
+        }
+
+        // Update the items in orderData
+        orderData['items'] = formattedItems;
+      }
+
+      // Remove any extra fields from the order data
+      orderData.remove('createdBy');
+      orderData.remove('updatedBy');
+      orderData.remove('createdAt');
+      orderData.remove('updatedAt');
+      orderData.remove('__v');
+
+      // Call the API
+      final response = await _post('/orders', body: orderData);
+
+      // Log the response
+      print('Create order API response: ${json.encode(response)}');
+
+      if (response['success'] == true) {
+        // Handle nested response structure
+        var orderData = response['data'];
+        if (orderData is Map &&
+            orderData.containsKey('success') &&
+            orderData.containsKey('data')) {
+          orderData = orderData['data'];
+        }
+
+        if (orderData != null && orderData['_id'] != null) {
+          final orderId = orderData['_id'];
+          print('Order saved successfully with ID: $orderId');
+
+          // Get the full order details
+          final orderDetails = await getOrder(orderId);
+          return orderDetails;
+        } else {
+          print('Order ID not found in response');
+          return {
+            'success': false,
+            'error': 'Order ID not found in response',
+          };
+        }
+      }
+
+      return response;
+    } catch (e) {
+      print('Error in createOrder: $e');
+      return {
+        'success': false,
+        'error': 'Exception during order creation: $e',
+      };
+    }
   }
 
   Future<Map<String, dynamic>> updateOrder(
       String id, Map<String, dynamic> orderData) async {
-    return await _put('/orders/$id', body: orderData);
+    try {
+      print('=== UPDATE ORDER REQUEST ===');
+      print('Order ID: $id');
+      print('Original order data: ${json.encode(orderData)}');
+
+      // Ensure items have proper product IDs
+      if (orderData.containsKey('items') && orderData['items'] is List) {
+        List<dynamic> items = orderData['items'];
+        List<dynamic> formattedItems = [];
+
+        for (int i = 0; i < items.length; i++) {
+          var item = items[i];
+          print('\nProcessing item $i: ${json.encode(item)}');
+
+          Map<String, dynamic> formattedItem = Map<String, dynamic>.from(item);
+
+          // Handle product ID
+          if (item.containsKey('product')) {
+            if (item['product'] is Map) {
+              formattedItem['product'] = item['product']['_id'];
+              print(
+                  'Product is Map, extracted ID: ${formattedItem['product']}');
+            } else if (item['product'] is String) {
+              // Validate product ID exists
+              try {
+                final productResponse = await getProduct(item['product']);
+                if (!productResponse['success']) {
+                  print('Product not found, skipping item');
+                  continue; // Skip this item if product doesn't exist
+                }
+                formattedItem['product'] = item['product'];
+                print('Product is String ID: ${formattedItem['product']}');
+              } catch (e) {
+                print('Error validating product: $e');
+                continue; // Skip this item if validation fails
+              }
+            }
+          }
+
+          // Handle measurements
+          if (item.containsKey('measurements')) {
+            if (item['measurements'] is Map) {
+              // If measurements is a map, create a new measurement
+              try {
+                final measurementData = {
+                  'customer': orderData['customer'],
+                  'category': item['product'] is Map
+                      ? item['product']['category']['_id']
+                      : null,
+                  'values': item['measurements'],
+                  'notes': item['notes'] ?? '',
+                };
+
+                final measurementResponse =
+                    await _post('/measurements', body: measurementData);
+
+                if (measurementResponse['success'] == true &&
+                    measurementResponse['data'] != null) {
+                  formattedItem['measurements'] =
+                      measurementResponse['data']['_id'];
+                  print(
+                      'Created new measurement: ${formattedItem['measurements']}');
+                } else {
+                  print('Failed to create measurement, setting to null');
+                  formattedItem['measurements'] = null;
+                }
+              } catch (e) {
+                print('Error creating measurement: $e');
+                formattedItem['measurements'] = null;
+              }
+            } else if (item['measurements'] is String) {
+              formattedItem['measurements'] = item['measurements'];
+              print(
+                  'Measurements is String ID: ${formattedItem['measurements']}');
+            }
+          }
+
+          // Remove any extra fields that shouldn't be sent to the API
+          formattedItem.remove('productName');
+          formattedItem.remove('productDescription');
+
+          // Ensure required fields
+          if (!formattedItem.containsKey('quantity')) {
+            formattedItem['quantity'] = 1;
+          }
+          if (!formattedItem.containsKey('price')) {
+            formattedItem['price'] = 0.0;
+          }
+
+          print('Formatted item: ${json.encode(formattedItem)}');
+          formattedItems.add(formattedItem);
+        }
+
+        // If no valid items remain, return error
+        if (formattedItems.isEmpty) {
+          return {
+            'success': false,
+            'error': 'No valid items to update',
+          };
+        }
+
+        // Update the items in orderData
+        orderData['items'] = formattedItems;
+      }
+
+      // Remove any extra fields from the order data
+      orderData.remove('customer');
+      orderData.remove('createdBy');
+      orderData.remove('updatedBy');
+      orderData.remove('createdAt');
+      orderData.remove('updatedAt');
+      orderData.remove('__v');
+
+      print('\nFinal order data being sent: ${json.encode(orderData)}');
+
+      // Call the API
+      final response = await _put('/orders/$id', body: orderData);
+
+      print('\nAPI Response: ${json.encode(response)}');
+
+      // If successful, get the updated order details to ensure everything is synced
+      if (response['success'] == true) {
+        final updatedOrder = await getOrder(id);
+        print('\nRetrieved updated order: ${updatedOrder['data'] != null}');
+        print('Updated order data: ${json.encode(updatedOrder['data'])}');
+
+        if (updatedOrder['success'] == true) {
+          return {
+            'success': true,
+            'data': updatedOrder['data'],
+          };
+        }
+      }
+
+      return response;
+    } catch (e) {
+      print('Error in updateOrder: $e');
+      return {
+        'success': false,
+        'error': 'Exception during order update: $e',
+      };
+    }
   }
 
   Future<Map<String, dynamic>> updateOrderStatus(

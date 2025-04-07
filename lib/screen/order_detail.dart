@@ -41,7 +41,8 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-class _OrderDetailScreenState extends State<OrderDetailScreen> {
+class _OrderDetailScreenState extends State<OrderDetailScreen>
+    with WidgetsBindingObserver {
   int _currentNavIndex = 0;
 
   // Order data fields
@@ -70,13 +71,66 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   final ApiService _apiService = ApiService();
 
+  bool _detailsFetched = false;
+  bool shouldRefresh = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Delay fetch until after the widget is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchOrderDetails();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // If we should refresh, fetch order details when the app is resumed
+      if (shouldRefresh && _orderId.isNotEmpty) {
+        print('App resumed with shouldRefresh flag, refreshing order details');
+        _fetchOrderDetails();
+      }
+    }
+  }
+
+  @override
+  void didChangeDependencies() async {
+    super.didChangeDependencies();
+    print('didChangeDependencies called in OrderDetailScreen');
+
+    if (!_detailsFetched) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      print('Order detail arguments: $args');
+
+      if (args is Map<String, dynamic> && args.containsKey('id')) {
+        setState(() {
+          _orderId = args['id'];
+          print('Order ID set: $_orderId');
+        });
+
+        // Set shouldRefresh flag if provided
+        if (args.containsKey('shouldRefresh')) {
+          shouldRefresh = args['shouldRefresh'] ?? false;
+          print('Should refresh flag: $shouldRefresh');
+        }
+      }
+
+      // Fetch the order details now that we have an ID
+      if (_orderId.isNotEmpty) {
+        print('Fetching order details for ID: $_orderId');
+        await _fetchOrderDetails();
+      }
+
+      _detailsFetched = true;
+    }
   }
 
   Future<void> _fetchOrderDetails() async {
@@ -84,6 +138,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
     setState(() {
       _isLoading = true;
+      // Clear existing order items to avoid duplication
+      _orderItems.clear();
     });
 
     try {
@@ -102,6 +158,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         } else if (args.containsKey('orderId')) {
           _orderId = args['orderId'];
         }
+
+        // Check for shouldRefresh flag
+        if (args.containsKey('shouldRefresh')) {
+          shouldRefresh = args['shouldRefresh'] ?? false;
+          print('Setting shouldRefresh flag to: $shouldRefresh');
+        }
+
         print('Order ID from map argument: $_orderId');
       } else {
         print(
@@ -111,7 +174,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       // If we have a valid order ID, fetch from API
       if (_orderId.isNotEmpty) {
         print('Fetching order details for ID: $_orderId');
-        final result = await _apiService.getOrder(_orderId);
+        // Force a fresh fetch from the server by adding a timestamp
+        final result = await _apiService
+            .getOrder('$_orderId?t=${DateTime.now().millisecondsSinceEpoch}');
         print('Order API result success: ${result['success']}');
 
         if (result['success'] && result['data'] != null) {
@@ -755,17 +820,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   void _navigateToEditOrder() {
-    // Try to extract measurements from order details for editing
-    Map<String, dynamic> measurements = {};
-
-    // Attempt to get measurements from API data or fetch from API directly
-    void _extractMeasurementsIfAvailable() {
-      // Logic to extract measurements from order data would go here
-      // For this implementation, we'll use a sample set of measurements if none are available
-    }
-
-    _extractMeasurementsIfAvailable();
-
     Navigator.pushNamed(
       context,
       '/new_order',
@@ -773,16 +827,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         'isEditing': true,
         'orderId': _orderId,
         'customerName': _customerName,
-        'customerPhone':
-            '+91 9876543210', // In a real implementation, this would be fetched from the API
-        'customerId': '', // Ideally get this from the API
-        'measurements': measurements,
+        'customerPhone': '',
+        'customerId': '',
         'orderData': {
           'status': _status,
           'notes': _notes,
-          'priority': _priority,
-          'totalAmount': _totalAmount,
           'dueDate': _dueDate,
+          'totalAmount': _totalAmount,
           'items': _orderItems
               .map((item) => {
                     'id': item.id,
@@ -796,16 +847,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       },
     ).then((_) {
       // Refresh order details when returning from edit screen
+      shouldRefresh = true;
       _fetchOrderDetails();
     });
   }
 
   void _navigateToBill() {
+    // Navigate to bill/invoice page with the order ID and a refresh flag
     Navigator.pushNamed(
       context,
       '/bill',
-      arguments: {'orderId': _orderId},
-    );
+      arguments: {
+        'orderId': _orderId,
+        'shouldRefresh': true, // Flag to indicate data should be refreshed
+      },
+    ).then((_) {
+      // Refresh order details when returning from bill screen
+      if (shouldRefresh && mounted) {
+        _fetchOrderDetails();
+      }
+    });
   }
 
   String _getNextStatus() {

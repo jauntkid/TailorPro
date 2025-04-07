@@ -862,90 +862,96 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   void _addCurrentItemToOrder() {
-    // Validate product selection first
+    // Validate product selection
     if (_selectedProduct == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select a product first'),
+          content: Text('Please select a product'),
           backgroundColor: AppTheme.accentColor,
         ),
       );
       return;
     }
 
-    // Check for missing measurements
-    bool hasMissingMeasurements = false;
-    if (_selectedProduct != null && _selectedProduct!.measurements.isNotEmpty) {
-      for (final measurement in _selectedProduct!.measurements) {
-        final controller = _measurementControllers[measurement.name];
-        if (controller == null || controller.text.trim().isEmpty) {
-          hasMissingMeasurements = true;
-          break;
-        }
-      }
+    // Validate and parse quantity
+    int quantity = 1;
+    if (_quantityController.text.isNotEmpty) {
+      quantity = int.tryParse(_quantityController.text) ?? 1;
     }
 
-    if (hasMissingMeasurements) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all measurements'),
-          backgroundColor: AppTheme.accentColor,
-        ),
-      );
-      return;
+    // Validate and parse price
+    double price = _selectedProduct!.price;
+    if (_priceController.text.isNotEmpty) {
+      price = double.tryParse(_priceController.text) ?? _selectedProduct!.price;
     }
 
-    // Collect measurements
-    Map<String, dynamic> measurements = {};
+    // Collect measurements data
+    Map<String, dynamic> measurementsData = {};
     _measurementControllers.forEach((key, controller) {
-      measurements[key] = controller.text.trim();
+      if (controller.text.isNotEmpty) {
+        // Try to parse as number if possible, otherwise store as string
+        final value = double.tryParse(controller.text) ?? controller.text;
+        measurementsData[key] = value;
+      }
     });
 
-    // Get quantity and price
-    final quantity = int.tryParse(_quantityController.text) ?? 1;
-    final price =
-        double.tryParse(_priceController.text) ?? _selectedProduct!.price;
-
-    // Add the current item to the order items list - handle measurements properly
-    Map<String, dynamic> itemData = {
-      'product': _selectedProduct!.id,
+    // Create the item with complete product information
+    Map<String, dynamic> orderItem = {
+      'product': _selectedProduct!.id, // Store the product ID string
+      'productId': _selectedProduct!.id, // Also store as productId for clarity
+      'productName': _selectedProduct!.name,
+      'productDescription': _selectedProduct!.description,
       'quantity': quantity,
       'price': price,
       'notes': _notesController.text.trim(),
-      // Add these for display purposes
-      'productName': _selectedProduct!.name,
-      'productDescription': _selectedProduct!.description,
     };
 
-    // Store measurements separately, not as part of items
-    if (measurements.isNotEmpty) {
-      // Don't add measurements directly to item, will handle separately
-      itemData['measurementsData'] = measurements;
+    // Add measurements data if any
+    if (measurementsData.isNotEmpty) {
+      orderItem['measurementsData'] = measurementsData;
     }
 
-    _orderItems.add(itemData);
+    print('Adding item to order: $orderItem');
+    print('Product ID: ${_selectedProduct!.id}');
 
-    // Show confirmation and reset product selection for next item
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${_selectedProduct!.name} added to order'),
-        backgroundColor: AppTheme.statusInProgress,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-
-    // Reset product selection, quantity, price, and notes for next item
+    // Add to order items or update if we're editing
     setState(() {
-      _selectedCategory = null;
+      if (_editingItemIndex != null) {
+        // Insert at the same index we removed from
+        _orderItems.insert(_editingItemIndex!, orderItem);
+        _editingItemIndex = null; // Reset editing index
+      } else {
+        _orderItems.add(orderItem);
+      }
+
+      // Reset selection and controllers
       _selectedProduct = null;
       _quantityController.text = '1';
       _priceController.text = '';
       _notesController.text = '';
-      _measurementControllers.clear();
+
+      // Clear measurement controllers
+      _measurementControllers.forEach((key, controller) {
+        controller.text = '';
+      });
     });
+
+    // Close the cart if it's expanded
+    if (_isCartExpanded) {
+      _toggleCart();
+    }
+
+    // Show success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${orderItem['productName']} added to order'),
+        backgroundColor: AppTheme.statusInProgress,
+      ),
+    );
   }
 
   Future<void> _createOrder() async {
+    // Validation checks
     if (_selectedCustomer == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -956,40 +962,6 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       return;
     }
 
-    // If there's a selected product that hasn't been added yet, ask the user what to do
-    if (_selectedProduct != null) {
-      final addCurrentItem = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: AppTheme.cardBackground,
-          title: const Text('Add Current Item?', style: AppTheme.headingMedium),
-          content: const Text(
-            'You have a product selected but not added to the order. Would you like to add it before creating the order?',
-            style: AppTheme.bodyRegular,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('No',
-                  style: TextStyle(color: AppTheme.textSecondary)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-              ),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Yes'),
-            ),
-          ],
-        ),
-      );
-
-      if (addCurrentItem == true) {
-        _addCurrentItemToOrder();
-      }
-    }
-
-    // Check if we have any items in the order
     if (_orderItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1009,23 +981,44 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       // Format the order items data for API with all necessary information
       List<Map<String, dynamic>> formattedItems = [];
       for (var item in _orderItems) {
+        // Ensure product ID is correctly formatted
+        String productId = '';
+        if (item.containsKey('product') && item['product'] != null) {
+          productId = item['product'].toString();
+        } else if (item.containsKey('productId') && item['productId'] != null) {
+          productId = item['productId'].toString();
+        }
+
+        if (productId.isEmpty) {
+          print('Warning: Item has no product ID: ${item['productName']}');
+          // Skip items without product IDs to prevent API errors
+          continue;
+        }
+
         Map<String, dynamic> formattedItem = {
-          'product': item['product'] ?? item['productId'], // Use product ID
-          'quantity': item['quantity'],
-          'price': item['price'],
+          'product': productId, // Always use the string ID
+          'quantity': item['quantity'] ?? 1,
+          'price': item['price'] ?? 0.0,
           'notes': item['notes'] ?? '',
-          'productName': item['productName'] ??
-              'Unknown Product', // Ensure product name is included
-          'productDescription': item['productDescription'] ??
-              '', // Ensure description is included
         };
 
+        // Include product name and description in API request for better debugging
+        if (item.containsKey('productName')) {
+          formattedItem['productName'] = item['productName'];
+        }
+
+        if (item.containsKey('productDescription')) {
+          formattedItem['productDescription'] = item['productDescription'];
+        }
+
         // Include measurements if available
-        if (item.containsKey('measurementsData')) {
+        if (item.containsKey('measurementsData') &&
+            item['measurementsData'] is Map) {
           formattedItem['measurements'] = item['measurementsData'];
         }
 
         formattedItems.add(formattedItem);
+        print('Formatted item for API: $formattedItem');
       }
 
       // Calculate the accurate total amount
@@ -1034,7 +1027,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       // Create order data for API
       final orderData = {
         'customer': _selectedCustomer!['_id'] ?? _selectedCustomer!['id'],
-        'items': formattedItems,
+        'items': formattedItems.map((item) {
+          // Ensure product ID is correctly formatted
+          if (item['product'] is Map) {
+            // If product is an object, extract its ID
+            item['product'] = item['product']['_id'] ?? item['product']['id'];
+          }
+          return item;
+        }).toList(),
         'status': _isEditing ? null : 'New', // Don't update status if editing
         'totalAmount': calculatedTotal, // Use calculated total
         'dueDate': _selectedDate!.toIso8601String(),
@@ -1050,15 +1050,22 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         // Update existing order
         print('Updating order with ID: $_orderId with total: $calculatedTotal');
         result = await _apiService.updateOrder(_orderId, orderData);
+
+        // Print debug info to verify API response
+        print('Update order API response: $result');
       } else {
         // Create new order
         print('Creating new order with total: $calculatedTotal');
         result = await _apiService.createOrder(orderData);
+
+        // Print debug info to verify API response
+        print('Create order API response: $result');
       }
 
       if (result['success']) {
         // Success! Get the order ID from the response.
         final String orderId = result['data']['_id'] ?? '';
+        print('Order saved successfully with ID: $orderId');
 
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1070,21 +1077,44 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           ),
         );
 
-        // Navigate to bill/invoice page with the order ID
+        // Navigate based on whether we're editing or creating
         if (orderId.isNotEmpty) {
-          Navigator.pushReplacementNamed(
-            context,
-            '/bill',
-            arguments: orderId,
-          );
+          if (_isEditing) {
+            // For updates, go back to order detail page with refresh flag
+            print('Navigating to order detail after update with refresh flag');
+            Navigator.pushNamedAndRemoveUntil(
+              context,
+              '/order_detail',
+              (route) => route.settings.name == '/', // Keep only the home route
+              arguments: {
+                'id': orderId,
+                'shouldRefresh':
+                    true, // Flag to indicate data should be refreshed
+              },
+            );
+          } else {
+            // For new orders, go to bill page
+            print('Navigating to bill page after creation');
+            Navigator.pushNamedAndRemoveUntil(
+              context,
+              '/bill',
+              (route) => route.settings.name == '/', // Keep only the home route
+              arguments: {
+                'orderId': orderId,
+                'shouldRefresh':
+                    true, // Flag to indicate data should be refreshed
+              },
+            );
+          }
         } else {
-          // If no order ID, just go back
-          Navigator.pop(context);
+          // If no order ID, just go back to home
+          Navigator.popUntil(context, ModalRoute.withName('/'));
         }
       } else {
         throw Exception(result['error'] ?? 'Failed to create order');
       }
     } catch (e) {
+      print('Error creating/updating order: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error: $e'),
