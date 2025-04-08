@@ -8,6 +8,8 @@ import '../widgets/order_card.dart';
 import '../widgets/search_bar.dart';
 import '../widgets/user_profile_header.dart';
 import '../providers/auth_provider.dart';
+import 'dart:async';
+import '../models/customer.dart';
 
 class HomeOrder {
   final String id;
@@ -62,6 +64,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final ScrollController _scrollController = ScrollController();
   DateTime? _lastRefreshTime;
+  Timer? _debounce;
+  List<dynamic> _searchResults = [];
+  bool _isSearching = false;
 
   @override
   void initState() {
@@ -78,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
     _searchController.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -104,80 +110,105 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _fetchOrders() async {
-    if (!mounted) return;
+    if (_isOrdersLoading) return;
 
     setState(() {
       _isOrdersLoading = true;
     });
 
     try {
-      // Fetch orders with page=1 and limit=5
-      final result = await _apiService.getOrders(page: _currentPage, limit: 5);
+      final result = await _apiService.getOrders(
+        page: _currentPage,
+        limit: 5,
+        search: _searchController.text,
+        context: context,
+      );
 
-      if (!mounted) return;
+      if (result['success']) {
+        final List<dynamic> orders = result['data']['data'] ?? [];
+        final int totalOrders = result['data']['total'] ?? 0;
 
-      if (result['success'] == true) {
-        List<dynamic> ordersJson = [];
+        setState(() {
+          _orders = orders.map((order) {
+            // Format order items for display
+            String itemsText = '';
+            if (order['items'] != null && order['items'] is List) {
+              List<String> itemNames = [];
+              for (var item in order['items']) {
+                String name = 'Unknown item';
+                if (item['product'] != null) {
+                  if (item['product'] is Map) {
+                    name = item['product']['name'] ?? name;
+                  } else if (item['product'] is String) {
+                    name = 'Item';
+                  }
+                }
+                if (item['quantity'] != null) {
+                  name = '${item['quantity']}x $name';
+                }
+                itemNames.add(name);
+              }
+              if (itemNames.length > 1) {
+                itemsText = '${itemNames[0]} +${itemNames.length - 1} more';
+              } else if (itemNames.length == 1) {
+                itemsText = itemNames[0];
+              }
+            }
 
-        // Handle different API response structures
-        if (result['data'] is List) {
-          ordersJson = result['data'];
-        } else if (result['data'] is Map &&
-            result['data'].containsKey('data')) {
-          ordersJson = result['data']['data'];
-        }
+            // Format date
+            String dueDate = '';
+            if (order['dueDate'] != null) {
+              try {
+                DateTime dateTime = DateTime.parse(order['dueDate']);
+                dueDate = '${dateTime.month}/${dateTime.day}/${dateTime.year}';
+              } catch (e) {
+                dueDate = 'Invalid date';
+              }
+            }
 
-        List<HomeOrder> parsedOrders = [];
-        for (var json in ordersJson) {
-          try {
-            // Convert JSON to more structured data
-            Map<String, dynamic> orderData = {
-              'id': json['_id'] ?? '',
-              'customerName': json['customer'] is Map
-                  ? json['customer']['name']
-                  : 'Unknown Customer',
-              'orderNumber': json['orderNumber'] ?? 'No number',
-              'items': _formatOrderItems(json['items']),
-              'dueDate': _formatDate(json['dueDate']),
-              'price': json['totalAmount'] is num
-                  ? json['totalAmount'].toDouble()
+            return HomeOrder(
+              id: order['_id'] ?? '',
+              customerName:
+                  order['customer'] != null && order['customer'] is Map
+                      ? order['customer']['name'] ?? 'Unknown Customer'
+                      : 'Unknown Customer',
+              orderNumber: order['orderNumber'] ?? '',
+              items: itemsText,
+              dueDate: dueDate,
+              price: (order['totalAmount'] is num)
+                  ? order['totalAmount'].toDouble()
                   : 0.0,
-              'status': json['status'] ?? 'Unknown',
-            };
-            parsedOrders.add(HomeOrder.fromJson(orderData));
-          } catch (e) {
-            print('Error parsing order: $e');
-          }
-        }
-
-        if (mounted) {
-          setState(() {
-            _orders = parsedOrders;
-            _isOrdersLoading = false;
-          });
-        }
+              status: order['status'] ?? 'Unknown',
+            );
+          }).toList();
+          _hasMoreOrders = _orders.length < totalOrders;
+          _isOrdersLoading = false;
+        });
       } else {
-        if (mounted) {
-          setState(() {
-            _isOrdersLoading = false;
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(result['error'] ?? 'Failed to load orders')),
-          );
-        }
-      }
-    } catch (e) {
-      print('Error fetching orders: $e');
-      if (mounted) {
         setState(() {
           _isOrdersLoading = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching orders: $e')),
-        );
+        if (!result['unauthorized']) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['error'] ?? 'Failed to fetch orders'),
+              backgroundColor: AppTheme.accentColor,
+            ),
+          );
+        }
       }
+    } catch (e) {
+      setState(() {
+        _isOrdersLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: AppTheme.accentColor,
+        ),
+      );
     }
   }
 
@@ -240,45 +271,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _currentPage++;
     final result = await _apiService.getOrders(page: _currentPage, limit: 5);
     if (result['success']) {
-      List<dynamic> ordersJson = [];
+      final List<dynamic> orders = result['data']['data'] ?? [];
+      final int totalOrders = result['data']['total'] ?? 0;
 
-      // Handle different API response structures
-      if (result['data'] is List) {
-        ordersJson = result['data'];
-      } else if (result['data'] is Map && result['data'].containsKey('data')) {
-        ordersJson = result['data']['data'];
-      }
-
-      if (ordersJson.isEmpty) {
+      if (orders.isEmpty) {
         setState(() {
           _hasMoreOrders = false;
         });
       } else {
-        List<HomeOrder> parsedOrders = [];
-        for (var json in ordersJson) {
-          try {
-            // Convert JSON to more structured data
-            Map<String, dynamic> orderData = {
-              'id': json['_id'] ?? '',
-              'customerName': json['customer'] is Map
-                  ? json['customer']['name']
-                  : 'Unknown Customer',
-              'orderNumber': json['orderNumber'] ?? 'No number',
-              'items': _formatOrderItems(json['items']),
-              'dueDate': _formatDate(json['dueDate']),
-              'price': json['totalAmount'] is num
-                  ? json['totalAmount'].toDouble()
-                  : 0.0,
-              'status': json['status'] ?? 'Unknown',
-            };
-            parsedOrders.add(HomeOrder.fromJson(orderData));
-          } catch (e) {
-            print('Error parsing order: $e');
+        List<HomeOrder> parsedOrders = orders.map((order) {
+          // Format order items for display
+          String itemsText = '';
+          if (order['items'] != null && order['items'] is List) {
+            List<String> itemNames = [];
+            for (var item in order['items']) {
+              String name = 'Unknown item';
+              if (item['product'] != null) {
+                if (item['product'] is Map) {
+                  name = item['product']['name'] ?? name;
+                } else if (item['product'] is String) {
+                  name = 'Item';
+                }
+              }
+              if (item['quantity'] != null) {
+                name = '${item['quantity']}x $name';
+              }
+              itemNames.add(name);
+            }
+            if (itemNames.length > 1) {
+              itemsText = '${itemNames[0]} +${itemNames.length - 1} more';
+            } else if (itemNames.length == 1) {
+              itemsText = itemNames[0];
+            }
           }
-        }
+
+          // Format date
+          String dueDate = '';
+          if (order['dueDate'] != null) {
+            try {
+              DateTime dateTime = DateTime.parse(order['dueDate']);
+              dueDate = '${dateTime.month}/${dateTime.day}/${dateTime.year}';
+            } catch (e) {
+              dueDate = 'Invalid date';
+            }
+          }
+
+          return HomeOrder(
+            id: order['_id'] ?? '',
+            customerName: order['customer'] != null && order['customer'] is Map
+                ? order['customer']['name'] ?? 'Unknown Customer'
+                : 'Unknown Customer',
+            orderNumber: order['orderNumber'] ?? '',
+            items: itemsText,
+            dueDate: dueDate,
+            price: (order['totalAmount'] is num)
+                ? order['totalAmount'].toDouble()
+                : 0.0,
+            status: order['status'] ?? 'Unknown',
+          );
+        }).toList();
 
         setState(() {
           _orders.addAll(parsedOrders);
+          _hasMoreOrders = _orders.length < totalOrders;
         });
       }
     } else {
@@ -292,211 +347,101 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _handleSearch(String query) async {
-    if (query.trim().isEmpty) return;
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (query.isNotEmpty) {
+        _performSearch(query);
+      } else {
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+      }
+    });
+  }
 
-    // Show loading indicator
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return const AlertDialog(
-          backgroundColor: AppTheme.cardBackground,
-          content: Row(
-            children: [
-              CircularProgressIndicator(color: AppTheme.primary),
-              SizedBox(width: 20),
-              Text("Searching...", style: AppTheme.bodyRegular),
-            ],
-          ),
-        );
-      },
-    );
+  Future<void> _performSearch(String query) async {
+    setState(() {
+      _isSearching = true;
+    });
 
     try {
-      // Search for orders
-      final orderResults = await _apiService.getOrders(search: query, limit: 5);
-
-      // Search for customers
-      final customerResults =
-          await _apiService.getCustomers(search: query, limit: 5);
-
-      // Dismiss loading dialog if still showing
-      if (Navigator.canPop(context)) {
-        Navigator.of(context).pop();
-      }
-
-      // Handle no results or error cases
-      bool hasOrderResults = orderResults['success'] == true &&
-          orderResults['data'] != null &&
-          (orderResults['data'] is List
-              ? orderResults['data'].isNotEmpty
-              : (orderResults['data'] is Map &&
-                      orderResults['data']['data'] != null
-                  ? orderResults['data']['data'].isNotEmpty
-                  : false));
-
-      bool hasCustomerResults = customerResults['success'] == true &&
-          customerResults['data'] != null &&
-          (customerResults['data'] is List
-              ? customerResults['data'].isNotEmpty
-              : (customerResults['data'] is Map &&
-                      customerResults['data']['data'] != null
-                  ? customerResults['data']['data'].isNotEmpty
-                  : false));
-
-      // If no results found
-      if (!hasOrderResults && !hasCustomerResults) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No results found for "$query"')),
-        );
-        return;
-      }
-
-      // Get the data in the correct format
-      List<dynamic> orders = [];
-      if (hasOrderResults) {
-        if (orderResults['data'] is List) {
-          orders = orderResults['data'];
-        } else if (orderResults['data'] is Map &&
-            orderResults['data']['data'] != null) {
-          orders = orderResults['data']['data'];
-        }
-      }
-
-      List<dynamic> customers = [];
-      if (hasCustomerResults) {
-        if (customerResults['data'] is List) {
-          customers = customerResults['data'];
-        } else if (customerResults['data'] is Map &&
-            customerResults['data']['data'] != null) {
-          customers = customerResults['data']['data'];
-        }
-      }
-
-      // Show results in a bottom sheet
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: AppTheme.cardBackground,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        builder: (BuildContext context) {
-          return DraggableScrollableSheet(
-            initialChildSize: 0.6,
-            minChildSize: 0.3,
-            maxChildSize: 0.9,
-            expand: false,
-            builder: (context, scrollController) {
-              return Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    child: const Text('Search Results',
-                        style: AppTheme.headingMedium),
-                  ),
-                  Divider(color: AppTheme.textSecondary.withOpacity(0.3)),
-                  Expanded(
-                    child: ListView(
-                      controller: scrollController,
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      children: [
-                        // Orders section
-                        if (orders.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Text('Orders',
-                                style: AppTheme.bodyLarge
-                                    .copyWith(fontWeight: FontWeight.bold)),
-                          ),
-                          ...List.generate(orders.length, (index) {
-                            final order = orders[index];
-                            final customerName = order['customer'] != null &&
-                                    order['customer'] is Map
-                                ? order['customer']['name'] ??
-                                    'Unknown customer'
-                                : 'Unknown customer';
-                            return ListTile(
-                              title: Text(
-                                  order['orderNumber'] ?? 'No order number',
-                                  style: AppTheme.bodyRegular),
-                              subtitle: Text(
-                                '$customerName - ${order['status'] ?? 'Unknown status'}',
-                                style: AppTheme.bodySmall,
-                              ),
-                              trailing: const Icon(Icons.chevron_right,
-                                  color: AppTheme.textSecondary),
-                              onTap: () {
-                                Navigator.pop(context);
-                                // Navigate to order detail page with order id
-                                Navigator.pushNamed(context, '/order_detail',
-                                    arguments: {'id': order['_id']});
-                              },
-                            );
-                          }),
-                        ],
-                        // Customers section
-                        if (customers.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Text('Customers',
-                                style: AppTheme.bodyLarge
-                                    .copyWith(fontWeight: FontWeight.bold)),
-                          ),
-                          ...List.generate(customers.length, (index) {
-                            final customer = customers[index];
-                            return ListTile(
-                              title: Text(customer['name'] ?? 'No name',
-                                  style: AppTheme.bodyRegular),
-                              subtitle: Text(
-                                customer['phone'] ?? 'No phone',
-                                style: AppTheme.bodySmall,
-                              ),
-                              trailing: const Icon(Icons.chevron_right,
-                                  color: AppTheme.textSecondary),
-                              onTap: () {
-                                Navigator.pop(context);
-                                // Navigate to user detail page with customer id
-                                Navigator.pushNamed(context, '/user_page',
-                                    arguments: {'id': customer['_id']});
-                              },
-                            );
-                          }),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
+      // Search both orders and customers
+      final ordersResult = await _apiService.getOrders(
+        search: query,
+        page: 1,
+        limit: 5,
       );
-    } catch (e) {
-      // Dismiss loading dialog if still showing
-      if (Navigator.canPop(context)) {
-        Navigator.of(context).pop();
+
+      final customersResult = await _apiService.getCustomers(
+        search: query,
+        page: 1,
+        limit: 5,
+      );
+
+      List<dynamic> searchResults = [];
+
+      if (ordersResult['success'] == true) {
+        List<dynamic> ordersJson = [];
+        if (ordersResult['data'] is List) {
+          ordersJson = ordersResult['data'];
+        } else if (ordersResult['data'] is Map &&
+            ordersResult['data'].containsKey('data')) {
+          ordersJson = ordersResult['data']['data'];
+        }
+        searchResults.addAll(
+            ordersJson.map((order) => {'type': 'order', 'data': order}));
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error searching: $e')),
+      if (customersResult['success'] == true) {
+        List<dynamic> customersJson = [];
+        if (customersResult['data'] is List) {
+          customersJson = customersResult['data'];
+        } else if (customersResult['data'] is Map &&
+            customersResult['data'].containsKey('data')) {
+          customersJson = customersResult['data']['data'];
+        }
+        searchResults.addAll(customersJson
+            .map((customer) => {'type': 'customer', 'data': customer}));
+      }
+
+      setState(() {
+        _searchResults = searchResults;
+        _isSearching = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isSearching = false;
+      });
+    }
+  }
+
+  void _handleSearchResultTap(Map<String, dynamic> result) {
+    setState(() {
+      _searchResults = [];
+      _searchController.clear();
+    });
+
+    if (result['type'] == 'order') {
+      _navigateToOrderDetail(result['data']['_id']);
+    } else if (result['type'] == 'customer') {
+      Navigator.pushNamed(
+        context,
+        '/customer_detail',
+        arguments: {'id': result['data']['_id']},
       );
     }
   }
 
   void _handleNavTap(int index) {
-    // Print debug info
-    print('Navigation tapped: $index');
+    print('Navigation tapped in home.dart: $index');
 
+    // Don't navigate if already on the selected page
     if (index == _currentNavIndex) {
       print('Already on this page, not navigating');
-      return; // Don't navigate if already on the page
+      return;
     }
-
-    setState(() {
-      _currentNavIndex = index;
-    });
 
     // Get the route from the AppBottomNav
     final String route = AppBottomNav.getRouteForIndex(index);
@@ -517,16 +462,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _navigateToOrderDetail(HomeOrder order) {
-    print('Navigating to order detail with ID: ${order.id}');
+  void _navigateToOrderDetail(String orderId) {
     Navigator.pushNamed(
       context,
       '/order_detail',
-      arguments: {'id': order.id},
-    ).then((_) {
-      // Refresh orders when returning from order detail
-      _refreshOrders();
-    });
+      arguments: {'id': orderId},
+    );
   }
 
   void _navigateToProfile() {
@@ -619,136 +560,204 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            // Header with user profile information fetched from the API
-            UserProfileHeader(
-              name: userData['name'] ?? 'Tailor User',
-              role: userData['role'] ?? 'User',
-              profileImageUrl: userData['profileImage'] ??
-                  'https://randomuser.me/api/portraits/men/32.jpg',
-              onProfileTap: _navigateToProfile,
-              onNotificationTap: _showNotifications,
+            Column(
+              children: [
+                // Header with user profile information fetched from the API
+                UserProfileHeader(
+                  name: userData['name'] ?? 'Tailor User',
+                  role: userData['role'] ?? 'User',
+                  profileImageUrl: userData['profileImage'] ??
+                      'https://randomuser.me/api/portraits/men/32.jpg',
+                  onProfileTap: _navigateToProfile,
+                  onNotificationTap: _showNotifications,
+                ),
+                // Search Bar
+                CustomSearchBar(
+                  hintText: 'Search orders or customers',
+                  onSearch: _onSearchChanged,
+                  controller: _searchController,
+                ),
+                // Action Cards
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.paddingMedium,
+                    vertical: AppTheme.paddingLarge,
+                  ),
+                  child: Row(
+                    children: [
+                      ActionCard(
+                        title: 'New User',
+                        subtitle: 'Add customer',
+                        backgroundColor: AppTheme.primary,
+                        icon: Icons.person_add,
+                        onTap: _navigateToNewCustomer,
+                      ),
+                      const SizedBox(width: AppTheme.paddingMedium),
+                      ActionCard(
+                        title: 'New Order',
+                        subtitle: 'Create order',
+                        backgroundColor: AppTheme.secondary,
+                        icon: Icons.add_shopping_cart,
+                        onTap: _navigateToNewOrder,
+                      ),
+                    ],
+                  ),
+                ),
+                // Recent Orders Section Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppTheme.paddingMedium),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Recent Orders',
+                        style: AppTheme.headingLarge,
+                      ),
+                      GestureDetector(
+                        onTap: _viewAllOrders,
+                        child: const Text(
+                          'See All',
+                          style: AppTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Orders list with infinite scrolling
+                Expanded(
+                  child: _isOrdersLoading && _orders.isEmpty
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: AppTheme.primary,
+                          ),
+                        )
+                      : _orders.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.assignment_outlined,
+                                    size: 64,
+                                    color:
+                                        AppTheme.textSecondary.withOpacity(0.5),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No recent orders',
+                                    style: AppTheme.bodyLarge.copyWith(
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextButton(
+                                    onPressed: _navigateToNewOrder,
+                                    child: const Text(
+                                      'Create a new order',
+                                      style: TextStyle(color: AppTheme.primary),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: _scrollController,
+                              padding:
+                                  const EdgeInsets.all(AppTheme.paddingMedium),
+                              itemCount:
+                                  _orders.length + (_hasMoreOrders ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index == _orders.length) {
+                                  return _hasMoreOrders
+                                      ? const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(8.0),
+                                            child: CircularProgressIndicator(),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink();
+                                }
+
+                                final order = _orders[index];
+                                return OrderCard(
+                                  customerName: order.customerName,
+                                  orderNumber: order.orderNumber,
+                                  items: order.items,
+                                  dueDate: order.dueDate,
+                                  price: order.price,
+                                  status: order.status,
+                                  onTap: () => _navigateToOrderDetail(order.id),
+                                  currencySymbol: '₹',
+                                );
+                              },
+                            ),
+                ),
+              ],
             ),
-            // Search Bar
-            CustomSearchBar(
-              hintText: 'Search orders or customers',
-              onSearch: _handleSearch,
-              controller: _searchController,
-            ),
-            // Action Cards
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.paddingMedium,
-                vertical: AppTheme.paddingLarge,
+            if (_searchResults.isNotEmpty)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Card(
+                  margin: EdgeInsets.all(8),
+                  color: AppTheme.cardBackground,
+                  child: Column(
+                    children: _searchResults.map((result) {
+                      final data = result['data'];
+                      final isOrder = result['type'] == 'order';
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppTheme.primary.withOpacity(0.1),
+                          child: Icon(
+                            isOrder ? Icons.shopping_bag : Icons.person,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                        title: Text(
+                          isOrder ? data['orderNumber'] : data['name'],
+                          style: AppTheme.bodyLarge.copyWith(
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        subtitle: Text(
+                          isOrder ? 'Order' : data['phone'] ?? 'No phone',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        trailing: Icon(
+                          Icons.chevron_right,
+                          color: AppTheme.textSecondary,
+                        ),
+                        onTap: () => _handleSearchResultTap(result),
+                      );
+                    }).toList(),
+                  ),
+                ),
               ),
-              child: Row(
-                children: [
-                  ActionCard(
-                    title: 'New User',
-                    subtitle: 'Add customer',
-                    backgroundColor: AppTheme.primary,
-                    icon: Icons.person_add,
-                    onTap: _navigateToNewCustomer,
-                  ),
-                  const SizedBox(width: AppTheme.paddingMedium),
-                  ActionCard(
-                    title: 'New Order',
-                    subtitle: 'Create order',
-                    backgroundColor: AppTheme.secondary,
-                    icon: Icons.add_shopping_cart,
-                    onTap: _navigateToNewOrder,
-                  ),
-                ],
-              ),
-            ),
-            // Recent Orders Section Header
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppTheme.paddingMedium),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Recent Orders',
-                    style: AppTheme.headingLarge,
-                  ),
-                  GestureDetector(
-                    onTap: _viewAllOrders,
-                    child: const Text(
-                      'See All',
-                      style: AppTheme.bodySmall,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Orders list with infinite scrolling
-            Expanded(
-              child: _isOrdersLoading && _orders.isEmpty
-                  ? const Center(
+            if (_isSearching)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Card(
+                  margin: EdgeInsets.all(8),
+                  color: AppTheme.cardBackground,
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(
                       child: CircularProgressIndicator(
                         color: AppTheme.primary,
                       ),
-                    )
-                  : _orders.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.assignment_outlined,
-                                size: 64,
-                                color: AppTheme.textSecondary.withOpacity(0.5),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No recent orders',
-                                style: AppTheme.bodyLarge.copyWith(
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextButton(
-                                onPressed: _navigateToNewOrder,
-                                child: const Text(
-                                  'Create a new order',
-                                  style: TextStyle(color: AppTheme.primary),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(AppTheme.paddingMedium),
-                          itemCount: _orders.length + (_hasMoreOrders ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (index == _orders.length) {
-                              return const Center(
-                                child: Padding(
-                                  padding:
-                                      EdgeInsets.all(AppTheme.paddingMedium),
-                                  child: CircularProgressIndicator(
-                                    color: AppTheme.primary,
-                                  ),
-                                ),
-                              );
-                            }
-                            final order = _orders[index];
-                            return OrderCard(
-                              customerName: order.customerName,
-                              orderNumber: order.orderNumber,
-                              items: order.items,
-                              dueDate: order.dueDate,
-                              price: order.price,
-                              status: order.status,
-                              onTap: () => _navigateToOrderDetail(order),
-                              currencySymbol: '₹',
-                            );
-                          },
-                        ),
-            ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

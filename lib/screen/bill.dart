@@ -195,7 +195,7 @@ class _BillScreenState extends State<BillScreen> with WidgetsBindingObserver {
       _orderId = orderId;
 
       try {
-        final response = await _apiService.getOrder(orderId);
+        final response = await _apiService.getOrderById(orderId);
         print('API response for order: $response');
 
         // Check if we have a nested response structure
@@ -578,7 +578,7 @@ class _BillScreenState extends State<BillScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _fetchOrderFromApi(String orderId) async {
-    final result = await _apiService.getOrder(orderId);
+    final result = await _apiService.getOrderById(orderId);
     print('API response for order: $result');
 
     if (!result['success']) {
@@ -759,22 +759,11 @@ class _BillScreenState extends State<BillScreen> with WidgetsBindingObserver {
   void _handleNavTap(int index) {
     print('Navigation tapped in bill.dart: $index');
 
-    // Don't navigate if already on the selected page
-    if (index == _currentNavIndex) {
-      print('Already on this page, not navigating');
-      return;
-    }
-
-    setState(() {
-      _currentNavIndex = index;
-    });
-
     // Get the route from the AppBottomNav
     final String route = AppBottomNav.getRouteForIndex(index);
     print('Navigating to route: $route');
 
     // Navigate to the selected route and clear the navigation stack
-    // Also pass the refresh flag to ensure orders are refreshed
     Navigator.pushNamedAndRemoveUntil(context, route, (r) => false,
         arguments: {'shouldRefresh': true});
   }
@@ -961,7 +950,7 @@ Please complete the payment. Thank you for your business!
 
       // Update the order status to Completed
       final response =
-          await _apiService.updateOrderStatus(_orderId, 'Completed');
+          await _apiService.updateOrderStatus(_orderId, '', 'Completed');
       print('Update order status response: $response');
 
       if (response['success']) {
@@ -2436,5 +2425,9 @@ Please complete the payment. Thank you for your business!
         ],
       ),
     );
+  }
+
+  String _formatCurrency(double amount) {
+    return 'Rs. ${amount.toStringAsFixed(2)}';
   }
 }

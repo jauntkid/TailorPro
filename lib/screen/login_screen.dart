@@ -3,6 +3,8 @@ import '../services/api_service.dart';
 import '../utils/error_handler.dart';
 import '../config/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,7 +19,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _apiService = ApiService();
   bool _isLoading = false;
   bool _isSignUp = false;
 
@@ -257,7 +258,8 @@ class _LoginScreenState extends State<LoginScreen> {
           labelStyle: const TextStyle(color: AppTheme.textSecondary),
           prefixIcon: Icon(icon, color: AppTheme.textSecondary),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           errorStyle: const TextStyle(color: AppTheme.primary),
         ),
         validator: validator,
@@ -272,11 +274,8 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        // First clear any existing tokens
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('token');
-
-        final result = await _apiService.login(
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final result = await authProvider.login(
           _emailController.text,
           _passwordController.text,
         );
@@ -292,9 +291,8 @@ class _LoginScreenState extends State<LoginScreen> {
               backgroundColor: AppTheme.statusInProgress,
             ),
           );
-          Navigator.pushReplacementNamed(context, '/home');
+          Navigator.pushReplacementNamed(context, '/');
         } else {
-          // Display the specific error from the API
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(result['error'] ??
@@ -309,7 +307,6 @@ class _LoginScreenState extends State<LoginScreen> {
           _isLoading = false;
         });
 
-        // Handle any other errors
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Network error. Please check your connection.'),
@@ -336,23 +333,31 @@ class _LoginScreenState extends State<LoginScreen> {
         'role': 'tailor',
       };
 
-      final result = await _apiService.register(userData);
+      try {
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final result = await authProvider.register(userData);
 
-      setState(() {
-        _isLoading = false;
-      });
+        setState(() {
+          _isLoading = false;
+        });
 
-      if (result['success']) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Registration successful! You are now logged in.'),
-            backgroundColor: AppTheme.statusInProgress,
-          ),
-        );
-        Navigator.pushReplacementNamed(context, '/home');
-      } else {
-        ErrorHandler.showError(
-            context, result['error'] ?? 'Registration failed');
+        if (result['success']) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Registration successful! You are now logged in.'),
+              backgroundColor: AppTheme.statusInProgress,
+            ),
+          );
+          Navigator.pushReplacementNamed(context, '/');
+        } else {
+          ErrorHandler.showError(
+              context, result['error'] ?? 'Registration failed');
+        }
+      } catch (e) {
+        setState(() {
+          _isLoading = false;
+        });
+        ErrorHandler.showError(context, 'Registration failed: $e');
       }
     }
   }

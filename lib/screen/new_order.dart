@@ -950,8 +950,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     );
   }
 
-  Future<void> _createOrder() async {
-    // Validation checks
+  Future<void> _saveOrder() async {
     if (_selectedCustomer == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -965,19 +964,18 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     if (_orderItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please add at least one item to the order'),
+          content: Text('Please add at least one item'),
           backgroundColor: AppTheme.accentColor,
         ),
       );
       return;
     }
 
-    try {
-      // Set loading state
-      setState(() {
-        _isLoading = true;
-      });
+    setState(() {
+      _isLoading = true;
+    });
 
+    try {
       // Format the order items data for API with all necessary information
       List<Map<String, dynamic>> formattedItems = [];
       for (var item in _orderItems) {
@@ -995,11 +993,39 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           continue;
         }
 
+        // Create measurement document if measurements are provided
+        String? measurementId;
+        if (item.containsKey('measurementsData') &&
+            item['measurementsData'] is Map) {
+          final measurementData = {
+            'customer': _selectedCustomer!['_id'] ?? _selectedCustomer!['id'],
+            'category': item['categoryId'],
+            'measurements': item['measurementsData'],
+            'notes': item['notes'] ?? '',
+          };
+
+          print('Creating measurement with data: $measurementData');
+          final measurementResult =
+              await _apiService.post('/measurements', body: measurementData);
+          print('Measurement creation response: $measurementResult');
+
+          if (measurementResult['success'] &&
+              measurementResult['data'] != null) {
+            measurementId = measurementResult['data']['_id'];
+            print('Created measurement with ID: $measurementId');
+          } else {
+            throw Exception(
+                'Failed to create measurement: ${measurementResult['error']}');
+          }
+        }
+
         Map<String, dynamic> formattedItem = {
           'product': productId, // Always use the string ID
           'quantity': item['quantity'] ?? 1,
           'price': item['price'] ?? 0.0,
           'notes': item['notes'] ?? '',
+          'deadline':
+              _selectedDate!.toIso8601String(), // Add deadline for each item
         };
 
         // Include product name and description in API request for better debugging
@@ -1011,10 +1037,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           formattedItem['productDescription'] = item['productDescription'];
         }
 
-        // Include measurements if available
-        if (item.containsKey('measurementsData') &&
-            item['measurementsData'] is Map) {
-          formattedItem['measurements'] = item['measurementsData'];
+        // Include measurement ID if available
+        if (measurementId != null) {
+          formattedItem['measurements'] = measurementId;
         }
 
         formattedItems.add(formattedItem);
@@ -1259,7 +1284,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                             ),
                             const SizedBox(width: 8),
                             ElevatedButton(
-                              onPressed: _createOrder,
+                              onPressed: _saveOrder,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.secondary,
                                 foregroundColor: Colors.white,
@@ -1368,8 +1393,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                                   const SizedBox(width: 16),
                                   Expanded(
                                     child: ElevatedButton(
-                                      onPressed:
-                                          _isLoading ? null : _createOrder,
+                                      onPressed: _isLoading ? null : _saveOrder,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: AppTheme.secondary,
                                         foregroundColor: Colors.white,
@@ -2402,23 +2426,15 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   void _handleNavTap(int index) {
-    print('Navigation tapped in new_order.dart: $index');
-
-    // Don't navigate if already on the selected page
-    if (index == _currentNavIndex) {
-      print('Already on this page, not navigating');
-      return;
+    if (index == 0) {
+      // Home index
+      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+    } else {
+      setState(() {
+        _currentNavIndex = index;
+      });
+      final String route = AppBottomNav.getRouteForIndex(index);
+      Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
     }
-
-    setState(() {
-      _currentNavIndex = index;
-    });
-
-    // Get the route from the AppBottomNav
-    final String route = AppBottomNav.getRouteForIndex(index);
-    print('Navigating to route: $route');
-
-    // Navigate to the selected route and clear the navigation stack
-    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
   }
 }

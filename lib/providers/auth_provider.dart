@@ -30,14 +30,23 @@ class AuthProvider extends ChangeNotifier {
       try {
         // Call API endpoint to validate the token and get updated user data
         final result = await _apiService.getCurrentUser();
+        print('Auth status check response: $result');
+
         if (result['success'] && result['data'] != null) {
-          _userData = result['data'];
+          // Ensure we're using the correct data structure
+          var userData = result['data'];
+          if (userData is Map && userData.containsKey('data')) {
+            userData = userData['data'];
+          }
+
+          _userData = userData;
+          print('Updated user data: $_userData');
 
           // Store the basic user data in SharedPreferences as backup
-          await _storeUserDataLocally(result['data']);
+          await _storeUserDataLocally(userData);
         } else {
           // Try to load cached user data while showing an error
-          _tryLoadCachedUserData();
+          await _tryLoadCachedUserData();
 
           print('Error fetching user data: ${result['error']}');
           // If the token is invalid, clear it
@@ -46,7 +55,7 @@ class AuthProvider extends ChangeNotifier {
         }
       } catch (e) {
         // Try to load cached user data in case of network errors
-        _tryLoadCachedUserData();
+        await _tryLoadCachedUserData();
 
         print('Error validating token: $e');
         // If there's an error, keep auth state but show warning on next API call
@@ -67,6 +76,7 @@ class AuthProvider extends ChangeNotifier {
       final String? userName = prefs.getString('user_name');
       final String? userEmail = prefs.getString('user_email');
       final String? userRole = prefs.getString('user_role');
+      final String? userProfileImage = prefs.getString('user_profile_image');
 
       if (userId != null && userName != null) {
         _userData = {
@@ -74,7 +84,10 @@ class AuthProvider extends ChangeNotifier {
           'name': userName,
           'email': userEmail,
           'role': userRole,
+          'profileImage': userProfileImage,
         };
+        print('Loaded cached user data: $_userData');
+        notifyListeners();
       }
     } catch (e) {
       print('Error loading cached user data: $e');
@@ -97,6 +110,11 @@ class AuthProvider extends ChangeNotifier {
       if (userData['role'] != null) {
         await prefs.setString('user_role', userData['role'].toString());
       }
+      if (userData['profileImage'] != null) {
+        await prefs.setString(
+            'user_profile_image', userData['profileImage'].toString());
+      }
+      print('Stored user data locally');
     } catch (e) {
       print('Error storing user data locally: $e');
     }
@@ -143,10 +161,16 @@ class AuthProvider extends ChangeNotifier {
     try {
       final result = await _apiService.getCurrentUser();
       if (result['success'] && result['data'] != null) {
-        _userData = result['data'];
+        var userData = result['data'];
+        if (userData is Map && userData.containsKey('data')) {
+          userData = userData['data'];
+        }
+
+        _userData = userData;
+        print('Fetched user data: $_userData');
 
         // Store basic user data for offline access
-        await _storeUserDataLocally(result['data']);
+        await _storeUserDataLocally(userData);
 
         notifyListeners();
       }
@@ -243,6 +267,23 @@ class AuthProvider extends ChangeNotifier {
     await clearToken();
     _isAuthenticated = false;
     _userData = null;
+    notifyListeners();
+  }
+
+  void setUserData(Map<String, dynamic> data) {
+    _userData = data;
+    notifyListeners();
+  }
+
+  void clearUserData() {
+    _userData = null;
+    notifyListeners();
+  }
+
+  // Update user data
+  Future<void> updateUserData(Map<String, dynamic> newData) async {
+    _userData = {...?_userData, ...newData};
+    await _storeUserDataLocally(_userData!);
     notifyListeners();
   }
 }

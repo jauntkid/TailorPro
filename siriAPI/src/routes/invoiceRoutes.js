@@ -6,6 +6,7 @@ const {
     updateInvoice,
     deleteInvoice,
     addPayment,
+    verifyPayment,
     removePayment
 } = require('../controllers/invoiceController');
 const { protect, admin } = require('../middleware/authMiddleware');
@@ -29,5 +30,8 @@ router.route('/:id/payments')
 
 router.route('/:id/payments/:paymentId')
     .delete(admin, removePayment);
+
+router.route('/:id/payments/:paymentId/verify')
+    .put(verifyPayment);
 
 module.exports = router; 

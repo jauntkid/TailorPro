@@ -1,8 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 import '../config/theme.dart';
 import '../services/api_service.dart';
+import '../widgets/app_bottom_nav.dart';
+import '../widgets/user_profile_header.dart';
+import '../providers/auth_provider.dart';
+import 'package:provider/provider.dart';
 
 class NewCustomerScreen extends StatefulWidget {
   const NewCustomerScreen({Key? key}) : super(key: key);
@@ -12,369 +17,327 @@ class NewCustomerScreen extends StatefulWidget {
 }
 
 class _NewCustomerScreenState extends State<NewCustomerScreen> {
-  // Form controllers
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _whatsappController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _referralController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
-
-  File? _profileImageFile; // Selected image file
-  final ImagePicker _picker = ImagePicker();
   final ApiService _apiService = ApiService();
-
-  bool _isSubmitting = false;
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+  File? _imageFile;
+  bool _isLoading = false;
+  int _currentNavIndex = 1;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _whatsappController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
     _addressController.dispose();
-    _referralController.dispose();
-    _noteController.dispose();
     super.dispose();
   }
 
-  // Allows user to choose an image from camera or gallery
-  Future<void> _selectProfileImage() async {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Gallery'),
-              onTap: () async {
-                Navigator.of(context).pop();
-                final pickedFile =
-                    await _picker.pickImage(source: ImageSource.gallery);
-                if (pickedFile != null) {
-                  setState(() {
-                    _profileImageFile = File(pickedFile.path);
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Profile photo updated'),
-                      backgroundColor: AppTheme.statusInProgress,
-                    ),
-                  );
-                }
-              },
+  Future<void> _pickImage() async {
+    try {
+      showModalBottomSheet(
+        context: context,
+        builder: (BuildContext context) {
+          return SafeArea(
+            child: Wrap(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('Choose from Gallery'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final XFile? pickedFile = await _picker.pickImage(
+                      source: ImageSource.gallery,
+                      imageQuality: 70,
+                    );
+                    if (pickedFile != null) {
+                      setState(() {
+                        _imageFile = File(pickedFile.path);
+                      });
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('Take a Photo'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final XFile? pickedFile = await _picker.pickImage(
+                      source: ImageSource.camera,
+                      imageQuality: 70,
+                    );
+                    if (pickedFile != null) {
+                      setState(() {
+                        _imageFile = File(pickedFile.path);
+                      });
+                    }
+                  },
+                ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Camera'),
-              onTap: () async {
-                Navigator.of(context).pop();
-                final pickedFile =
-                    await _picker.pickImage(source: ImageSource.camera);
-                if (pickedFile != null) {
-                  setState(() {
-                    _profileImageFile = File(pickedFile.path);
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Profile photo updated'),
-                      backgroundColor: AppTheme.statusInProgress,
-                    ),
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Simulated method: Upload the image file to your server and return its URL.
-  Future<String?> _uploadProfileImage(File imageFile) async {
-    // TODO: Implement your file upload logic here.
-    // For example, you might use http.MultipartRequest to upload the file.
-    // Here we simulate a successful upload by returning a dummy URL.
-    await Future.delayed(const Duration(seconds: 2));
-    return 'https://yourserver.com/uploads/${imageFile.path.split('/').last}';
+          );
+        },
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking image: $e')),
+      );
+    }
   }
 
   Future<void> _createCustomer() async {
-    // Validate form fields
-    if (_nameController.text.isEmpty || _whatsappController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Name and WhatsApp number are required'),
-          backgroundColor: AppTheme.accentColor,
-        ),
-      );
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      _isSubmitting = true;
+      _isLoading = true;
     });
 
-    String? profileImageUrl;
-    if (_profileImageFile != null) {
-      // Upload the image first
-      profileImageUrl = await _uploadProfileImage(_profileImageFile!);
-      if (profileImageUrl == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Image upload failed'),
-            backgroundColor: AppTheme.accentColor,
-          ),
-        );
-        setState(() {
-          _isSubmitting = false;
-        });
-        return;
+    try {
+      String? imageBase64;
+      if (_imageFile != null) {
+        List<int> imageBytes = await _imageFile!.readAsBytes();
+        imageBase64 = base64Encode(imageBytes);
       }
+
+      final result = await _apiService.createCustomer({
+        'name': _nameController.text,
+        'phone': _phoneController.text,
+        'email': _emailController.text,
+        'address': _addressController.text,
+        'profileImage': imageBase64,
+      });
+
+      if (result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Customer created successfully')),
+        );
+        Navigator.pop(context, true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(result['error'] ?? 'Failed to create customer')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating customer: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
+  }
 
-    // Build customer data payload
-    final customerData = {
-      'name': _nameController.text,
-      'phone': _whatsappController.text,
-      'address': _addressController.text,
-      'referral': _referralController.text,
-      'note': _noteController.text,
-      'profileImage': profileImageUrl, // may be null if no image was selected
-    };
-
-    // Call API to create customer
-    final result = await _apiService.createCustomer(customerData);
-
+  void _handleNavTap(int index) {
     setState(() {
-      _isSubmitting = false;
+      _currentNavIndex = index;
     });
 
-    if (result['success']) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Customer created successfully'),
-          backgroundColor: AppTheme.statusInProgress,
-        ),
-      );
-      Navigator.pop(context);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['error'] ?? 'Failed to create customer'),
-          backgroundColor: AppTheme.accentColor,
-        ),
-      );
-    }
+    final String route = AppBottomNav.getRouteForIndex(index);
+    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
   }
 
-  void _exit() {
-    Navigator.pop(context);
+  void _navigateToProfile() {
+    Navigator.pushNamed(context, '/user_page');
   }
 
-  Widget _buildProfilePhotoSection() {
-    return Center(
-      child: GestureDetector(
-        onTap: _selectProfileImage,
-        child: Column(
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: AppTheme.cardBackground,
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: AppTheme.borderColor.withOpacity(0.3), width: 2),
-              ),
-              child: _profileImageFile != null
-                  ? CircleAvatar(
-                      radius: 58,
-                      backgroundImage: FileImage(_profileImageFile!),
-                    )
-                  : const Icon(
-                      Icons.add_a_photo,
-                      size: 40,
-                      color: AppTheme.textSecondary,
-                    ),
-            ),
-            const SizedBox(height: AppTheme.paddingSmall),
-            Text(
-              _profileImageFile != null ? 'Change Photo' : 'Add Photo',
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hintText,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.cardBackground,
-        borderRadius: BorderRadius.circular(AppTheme.borderRadiusSmall),
-      ),
-      child: TextField(
-        controller: controller,
-        style: AppTheme.bodyRegular,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: const TextStyle(color: Color(0xFFADAEBC)),
-          prefixIcon: Icon(icon, color: AppTheme.textSecondary),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 16,
-            horizontal: 16,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomActions() {
-    return Container(
-      color: AppTheme.cardBackground,
-      padding: const EdgeInsets.all(AppTheme.paddingMedium),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
-              onPressed: _isSubmitting ? null : _createCustomer,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(9999),
-                ),
-              ),
-              child: _isSubmitting
-                  ? const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                    )
-                  : Text(
-                      'Create Customer',
-                      style: AppTheme.bodyLarge.copyWith(color: Colors.black),
-                    ),
-            ),
-          ),
-          const SizedBox(height: AppTheme.paddingMedium),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton(
-              onPressed: _exit,
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(width: 1, color: Colors.white),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(9999),
-                ),
-              ),
-              child: const Text(
-                'Exit',
-                style: AppTheme.bodyLarge,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _showNotifications() {
+    // Implement notifications
   }
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final userData = authProvider.userData ?? {};
+
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        title: const Text('New Customer', style: AppTheme.headingLarge),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
-          onPressed: _exit,
-        ),
-      ),
       body: SafeArea(
         child: Column(
           children: [
+            // Header with user profile information
+            UserProfileHeader(
+              name: userData['name'] ?? 'Tailor User',
+              role: userData['role'] ?? 'User',
+              profileImageUrl: userData['profileImage'] ??
+                  'https://randomuser.me/api/portraits/men/32.jpg',
+              onProfileTap: _navigateToProfile,
+              onNotificationTap: _showNotifications,
+            ),
+
+            // Form
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AppTheme.paddingMedium),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Profile photo section
-                    const Text(
-                      'Profile Photo',
-                      style: AppTheme.bodySmall,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildProfilePhotoSection(),
-                    const SizedBox(height: AppTheme.paddingLarge),
-                    // Customer Information
-                    const Text(
-                      'Customer Information',
-                      style: AppTheme.bodySmall,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildTextField(
-                      controller: _nameController,
-                      hintText: 'Full Name',
-                      icon: Icons.person,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildTextField(
-                      controller: _whatsappController,
-                      hintText: 'WhatsApp Number',
-                      icon: Icons.phone,
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildTextField(
-                      controller: _addressController,
-                      hintText: 'Address',
-                      icon: Icons.location_on,
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: AppTheme.paddingLarge),
-                    const Text(
-                      'Referral Information',
-                      style: AppTheme.bodySmall,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildTextField(
-                      controller: _referralController,
-                      hintText: 'How did they find you?',
-                      icon: Icons.people,
-                    ),
-                    const SizedBox(height: AppTheme.paddingLarge),
-                    const Text(
-                      'Notes',
-                      style: AppTheme.bodySmall,
-                    ),
-                    const SizedBox(height: AppTheme.paddingMedium),
-                    _buildTextField(
-                      controller: _noteController,
-                      hintText: 'Add any additional information here...',
-                      icon: Icons.note,
-                      maxLines: 4,
-                    ),
-                  ],
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Add New Customer',
+                        style: AppTheme.headingMedium
+                            .copyWith(color: Colors.white),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Profile Image Upload
+                      Center(
+                        child: GestureDetector(
+                          onTap: _pickImage,
+                          child: CircleAvatar(
+                            radius: 50,
+                            backgroundColor: AppTheme.cardBackground,
+                            backgroundImage: _imageFile != null
+                                ? FileImage(_imageFile!)
+                                : null,
+                            child: _imageFile == null
+                                ? const Icon(Icons.add_a_photo,
+                                    size: 30, color: Colors.white)
+                                : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Name Field
+                      TextFormField(
+                        controller: _nameController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Name',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          prefixIcon:
+                              const Icon(Icons.person, color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white),
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a name';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Phone Field
+                      TextFormField(
+                        controller: _phoneController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Phone Number',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          prefixIcon:
+                              const Icon(Icons.phone, color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white),
+                          ),
+                        ),
+                        keyboardType: TextInputType.phone,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a phone number';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Email Field
+                      TextFormField(
+                        controller: _emailController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Email (Optional)',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          prefixIcon:
+                              const Icon(Icons.email, color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white),
+                          ),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Address Field
+                      TextFormField(
+                        controller: _addressController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Address (Optional)',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          prefixIcon: const Icon(Icons.location_on,
+                              color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white),
+                          ),
+                        ),
+                        maxLines: 3,
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Submit Button
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _createCustomer,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  'Create Customer',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            _buildBottomActions(),
           ],
         ),
+      ),
+      bottomNavigationBar: AppBottomNav(
+        currentIndex: _currentNavIndex,
+        onTap: _handleNavTap,
       ),
     );
   }

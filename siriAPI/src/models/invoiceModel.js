@@ -16,6 +16,8 @@ const paymentSchema = new mongoose.Schema({
     },
     transactionId: {
         type: String,
+        required: [true, 'Please add a transaction ID'],
+        unique: true,
     },
     notes: {
         type: String,
@@ -24,6 +26,29 @@ const paymentSchema = new mongoose.Schema({
     recordedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
+    },
+    // Payment status
+    status: {
+        type: String,
+        enum: ['Pending', 'Completed', 'Failed', 'Refunded'],
+        default: 'Pending',
+    },
+    // Payment verification details
+    verification: {
+        verified: {
+            type: Boolean,
+            default: false,
+        },
+        verifiedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        verifiedAt: {
+            type: Date,
+        },
+        notes: {
+            type: String,
+        },
     },
 });
 

@@ -20,86 +20,60 @@ class UserProfileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(
-        AppTheme.paddingMedium,
-        AppTheme.paddingSmall,
-        AppTheme.paddingMedium,
-        AppTheme.paddingMedium,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.paddingMedium,
+        vertical: AppTheme.paddingSmall,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBackground,
+        border: Border(
+          bottom: BorderSide(
+            color: AppTheme.borderColor.withOpacity(0.1),
+          ),
+        ),
       ),
       child: Row(
         children: [
+          // Profile Image
           GestureDetector(
             onTap: () {
-              onProfileTap();
+              Navigator.pushNamed(context, '/user_profile');
             },
-            child: Row(
+            child: CircleAvatar(
+              radius: 20,
+              backgroundImage: NetworkImage(profileImageUrl),
+              onBackgroundImageError: (_, __) {
+                // Fallback for image loading error
+              },
+              child: const Icon(Icons.person, color: Colors.white, size: 20),
+            ),
+          ),
+          const SizedBox(width: AppTheme.paddingMedium),
+          // User Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Image.network(
-                      profileImageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          color: AppTheme.primary.withOpacity(0.2),
-                          child: const Icon(
-                            Icons.person,
-                            color: AppTheme.primary,
-                          ),
-                        );
-                      },
-                    ),
+                Text(
+                  name,
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(width: AppTheme.paddingMedium),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Welcome,',
-                      style: AppTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      name,
-                      style: AppTheme.headingMedium,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      role,
-                      style: AppTheme.bodySmall,
-                    ),
-                  ],
+                Text(
+                  role,
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
           ),
-          const Spacer(),
+          // Notification Icon
           IconButton(
+            icon: const Icon(Icons.notifications_outlined),
             onPressed: onNotificationTap,
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: AppTheme.textPrimary,
-            ),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            color: AppTheme.textSecondary,
           ),
         ],
       ),

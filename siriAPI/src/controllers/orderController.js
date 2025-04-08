@@ -363,37 +363,79 @@ const updateOrder = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const updateOrderStatus = asyncHandler(async (req, res) => {
-    const { status } = req.body;
+    try {
+        const { orderId, itemId, newStatus } = req.body;
 
-    if (!status) {
-        throw new ErrorResponse('Status is required', 400);
-    }
-
-    let order = await Order.findById(req.params.id);
-
-    if (!order) {
-        throw new ErrorResponse(`Order not found with id of ${req.params.id}`, 404);
-    }
-
-    // Update order status
-    order = await Order.findByIdAndUpdate(
-        req.params.id,
-        {
-            status,
-            updatedBy: req.user.id
-        },
-        {
-            new: true,
-            runValidators: true
+        if (!orderId || !itemId || !newStatus) {
+            return res.status(400).json({
+                success: false,
+                error: 'Order ID, Item ID, and new status are required',
+            });
         }
-    )
-        .populate('customer', 'name phone')
-        .populate('updatedBy', 'name');
 
-    res.status(200).json({
-        success: true,
-        data: order
-    });
+        const order = await Order.findById(orderId);
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                error: 'Order not found',
+            });
+        }
+
+        // Find the item in the order
+        const itemIndex = order.items.findIndex(item => item._id.toString() === itemId);
+        if (itemIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                error: 'Item not found in order',
+            });
+        }
+
+        // Ensure the item has a deadline
+        if (!order.items[itemIndex].deadline) {
+            // If no deadline is set, use the order's dueDate or set a default deadline
+            order.items[itemIndex].deadline = order.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // Default to 7 days from now
+        }
+
+        // Update the item's status
+        order.items[itemIndex].status = newStatus;
+
+        // If the item is completed, set the completedAt timestamp
+        if (newStatus === 'Completed') {
+            order.items[itemIndex].completedAt = new Date();
+        }
+
+        // Check all items' statuses
+        const allItemsCompleted = order.items.every(item => item.status === 'Completed');
+        const allItemsReady = order.items.every(item => item.status === 'Ready');
+        const someItemsReady = order.items.some(item => item.status === 'Ready' || item.status === 'Completed');
+        const someItemsInProgress = order.items.some(item => item.status === 'In Progress');
+
+        // Update order status based on item statuses
+        if (allItemsCompleted) {
+            order.status = 'Completed';
+        } else if (allItemsReady) {
+            order.status = 'Ready';
+        } else if (someItemsReady) {
+            order.status = 'Partially Ready';
+        } else if (someItemsInProgress) {
+            order.status = 'In Progress';
+        } else {
+            order.status = 'New';
+        }
+
+        await order.save();
+
+        res.status(200).json({
+            success: true,
+            data: order,
+        });
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error updating order status',
+        });
+    }
 });
 
 /**

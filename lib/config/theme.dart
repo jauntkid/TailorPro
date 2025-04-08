@@ -9,15 +9,21 @@ class AppTheme {
   static const Color textPrimary = Colors.white;
   static const Color textSecondary = Color(0xFF9CA3AF);
   static const Color border = Color(0xFFE5E7EB);
-  static const Color statusInProgress = Color(0xFF10B981);
-  static const Color statusReady = Color(0xFF3B82F6);
   static const Color accentColor = Color(0xFFF82C2C);
   static const Color dividerColor = Color(0xFF2A2A2A);
   static const Color borderColor = Color(0xFFE5E7EB);
 
-  // Status Background Colors
+  // Status colors
+  static const Color statusUrgent = Color(0xFFDC2626);
+  static const Color statusInProgress = Color(0xFFF59E0B);
+  static const Color statusReady = Color(0xFF10B981);
+  static const Color statusCompleted = Color(0xFF6B7280);
+
+  // Status background colors
+  static const Color statusUrgentBg = Color(0x33DC2626);
   static const Color statusInProgressBg = Color(0x3310B981);
   static const Color statusReadyBg = Color(0x333B82F6);
+  static const Color statusCompletedBg = Color(0x336B7280);
 
   // Font Styles
   static const TextStyle headingLarge = TextStyle(
@@ -31,6 +37,14 @@ class AppTheme {
   static const TextStyle headingMedium = TextStyle(
     color: textPrimary,
     fontSize: 18,
+    fontFamily: 'Inter',
+    fontWeight: FontWeight.w700,
+    height: 1,
+  );
+
+  static const TextStyle headingSmall = TextStyle(
+    color: textPrimary,
+    fontSize: 16,
     fontFamily: 'Inter',
     fontWeight: FontWeight.w700,
     height: 1,

@@ -100,7 +100,7 @@ class _PresetScreenState extends State<PresetScreen> {
   }
 
   Future<void> _saveBusinessDetails() async {
-    setState(() {
+          setState(() {
       _isLoading = true;
     });
 
@@ -108,12 +108,12 @@ class _PresetScreenState extends State<PresetScreen> {
       // In a real app, this would save to API/backend
       await Future.delayed(const Duration(seconds: 1)); // Simulating API call
 
-      ScaffoldMessenger.of(context).showSnackBar(
+          ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Business details saved successfully'),
-          backgroundColor: AppTheme.statusInProgress,
-        ),
-      );
+              backgroundColor: AppTheme.statusInProgress,
+            ),
+          );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -208,9 +208,9 @@ class _PresetScreenState extends State<PresetScreen> {
                         style: AppTheme.buttonLarge,
                       ),
                     ),
-                  ),
-                ],
-              ),
+          ),
+        ],
+      ),
             ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _currentNavIndex,
@@ -228,7 +228,7 @@ class _PresetScreenState extends State<PresetScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          children: [
+                  children: [
             // Profile image
             Container(
               width: 100,
@@ -253,11 +253,11 @@ class _PresetScreenState extends State<PresetScreen> {
                         Icons.person,
                         color: AppTheme.primary,
                         size: 50,
-                      ),
-                    );
-                  },
                 ),
-              ),
+              );
+            },
+          ),
+        ),
             ),
             const SizedBox(height: 16),
 
@@ -286,7 +286,7 @@ class _PresetScreenState extends State<PresetScreen> {
 
             // Edit profile button
             OutlinedButton(
-              onPressed: () {
+            onPressed: () {
                 // Navigate to edit profile page
               },
               style: OutlinedButton.styleFrom(
@@ -545,7 +545,7 @@ class _PresetScreenState extends State<PresetScreen> {
   Widget _buildTextField(
       TextEditingController controller, String label, IconData icon) {
     return Container(
-      decoration: BoxDecoration(
+                decoration: BoxDecoration(
         color: AppTheme.background,
         borderRadius: BorderRadius.circular(8),
       ),

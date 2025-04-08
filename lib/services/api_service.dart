@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
 
 class ApiService {
   // Base URLs for different environments
@@ -22,28 +23,71 @@ class ApiService {
   }
 
   // Headers
-  Future<Map<String, String>> _getHeaders({bool requireAuth = true}) async {
-    Map<String, String> headers = {
+  Future<Map<String, String>> _getHeaders(
+      {bool requireAuth = true, BuildContext? context}) async {
+    final headers = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
     };
 
     if (requireAuth) {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token');
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
+      print('Getting headers - Current token: $token');
+
+      if (token == null) {
+        print('No token found in SharedPreferences');
+        if (context != null) {
+          // Clear any existing token
+          await prefs.remove('token');
+          // Navigate to login page
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/login', (route) => false);
+        }
+        throw Exception('No token found');
       }
+
+      headers['Authorization'] = 'Bearer $token';
+      print('Headers with token: $headers');
     }
 
     return headers;
   }
 
+  // Handle unauthorized response
+  Future<void> _handleUnauthorized(BuildContext? context) async {
+    // Clear token
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+
+    // Navigate to login if context is provided
+    if (context != null) {
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+    }
+  }
+
   // Generic API request handler
-  Map<String, dynamic> _handleResponse(http.Response response) {
+  Future<Map<String, dynamic>> _handleResponse(http.Response response,
+      {BuildContext? context}) async {
     try {
       final data = jsonDecode(response.body);
+
+      // Handle unauthorized response
+      if (response.statusCode == 401) {
+        await _handleUnauthorized(context);
+        return {
+          'success': false,
+          'error': 'Session expired. Please login again.',
+          'unauthorized': true
+        };
+      }
+
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        // If the response is already in the correct format, return it
+        if (data is Map<String, dynamic> && data.containsKey('success')) {
+          return data;
+        }
+
+        // Otherwise wrap the data in the expected format
         return {'success': true, 'data': data};
       } else {
         print('API Error: ${response.statusCode}, Body: ${response.body}');
@@ -62,402 +106,37 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> _get(String endpoint,
-      {Map<String, dynamic>? queryParams, bool requireAuth = true}) async {
+  Future<Map<String, dynamic>> get(String endpoint,
+      {Map<String, dynamic>? queryParams,
+      bool requireAuth = true,
+      BuildContext? context}) async {
     try {
-      var uri = Uri.parse('$baseUrl$endpoint');
-      if (queryParams != null) {
-        uri = uri.replace(
-            queryParameters: queryParams
-                .map((key, value) => MapEntry(key, value?.toString())));
-      }
+      final uri =
+          Uri.parse('$baseUrl$endpoint').replace(queryParameters: queryParams);
+      print('GET request to: $uri');
 
       final response = await http.get(
         uri,
-        headers: await _getHeaders(requireAuth: requireAuth),
+        headers: await _getHeaders(requireAuth: requireAuth, context: context),
       );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
 
-      return _handleResponse(response);
-    } catch (e) {
-      print('GET error: $e');
-      return {'success': false, 'error': 'Network error: $e'};
-    }
-  }
-
-  Future<Map<String, dynamic>> _post(String endpoint,
-      {Map<String, dynamic>? body, bool requireAuth = true}) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl$endpoint'),
-        headers: await _getHeaders(requireAuth: requireAuth),
-        body: body != null ? jsonEncode(body) : null,
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('POST error: $e');
-      return {'success': false, 'error': 'Network error: $e'};
-    }
-  }
-
-  Future<Map<String, dynamic>> _put(String endpoint,
-      {Map<String, dynamic>? body, bool requireAuth = true}) async {
-    try {
-      final response = await http.put(
-        Uri.parse('$baseUrl$endpoint'),
-        headers: await _getHeaders(requireAuth: requireAuth),
-        body: body != null ? jsonEncode(body) : null,
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('PUT error: $e');
-      return {'success': false, 'error': 'Network error: $e'};
-    }
-  }
-
-  Future<Map<String, dynamic>> _delete(String endpoint,
-      {bool requireAuth = true}) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl$endpoint'),
-        headers: await _getHeaders(requireAuth: requireAuth),
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      print('DELETE error: $e');
-      return {'success': false, 'error': 'Network error: $e'};
-    }
-  }
-
-  // Auth APIs
-  Future<Map<String, dynamic>> register(Map<String, dynamic> userData) async {
-    final result =
-        await _post('/users/register', body: userData, requireAuth: false);
-    if (result['success']) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', result['data']['accessToken']);
-    }
-    return result;
-  }
-
-  Future<Map<String, dynamic>> login(String email, String password) async {
-    final result = await _post(
-      '/users/login',
-      body: {'email': email, 'password': password},
-      requireAuth: false,
-    );
-
-    if (result['success']) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', result['data']['accessToken']);
-    }
-    return result;
-  }
-
-  Future<Map<String, dynamic>> getCurrentUser() async {
-    return await _get('/users/me');
-  }
-
-  Future<Map<String, dynamic>> logout() async {
-    final result = await _post('/users/logout');
-    if (result['success']) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('token');
-    }
-    return result;
-  }
-
-  // Customer APIs
-  Future<Map<String, dynamic>> getCustomers(
-      {int page = 1, int limit = 10, String? search}) async {
-    try {
-      String url = '$baseUrl/customers?page=$page&limit=$limit';
-      if (search != null && search.isNotEmpty) {
-        url += '&search=$search';
+      if (response.statusCode == 401) {
+        if (context != null) {
+          // Clear token and redirect to login
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('token');
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/login', (route) => false);
+        }
+        return {'success': false, 'unauthorized': true};
       }
 
-      final response = await http.get(
-        Uri.parse(url),
-        headers: await _getHeaders(),
-      );
+      final data = jsonDecode(response.body);
+      print('Parsed response: $data');
 
-      return _handleResponse(response);
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> getCustomerById(String id) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/customers/$id'),
-        headers: await _getHeaders(),
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> createCustomer(
-      Map<String, dynamic> customerData) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/customers'),
-        headers: await _getHeaders(),
-        body: json.encode(customerData),
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> updateCustomer(
-      String id, Map<String, dynamic> customerData) async {
-    try {
-      final response = await http.put(
-        Uri.parse('$baseUrl/customers/$id'),
-        headers: await _getHeaders(),
-        body: json.encode(customerData),
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> deleteCustomer(String id) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/customers/$id'),
-        headers: await _getHeaders(),
-      );
-
-      return _handleResponse(response);
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> getCustomerOrders(String customerId) async {
-    return await _get('/customers/$customerId/orders');
-  }
-
-  Future<Map<String, dynamic>> getCustomerMeasurements(
-      String customerId) async {
-    return await _get('/customers/$customerId/measurements');
-  }
-
-  // Category APIs
-  Future<Map<String, dynamic>> getCategories() async {
-    return await _get('/categories');
-  }
-
-  Future<Map<String, dynamic>> getCategory(String id) async {
-    return await _get('/categories/$id');
-  }
-
-  Future<Map<String, dynamic>> getCategoryProducts(String categoryId) async {
-    return await _get('/categories/$categoryId/products');
-  }
-
-  // Product APIs
-  Future<Map<String, dynamic>> getProducts({
-    int page = 1,
-    int limit = 10,
-    String? search,
-    String? category,
-    bool? active,
-  }) async {
-    return await _get(
-      '/products',
-      queryParams: {
-        'page': page,
-        'limit': limit,
-        'search': search,
-        'category': category,
-        'active': active,
-      },
-    );
-  }
-
-  Future<Map<String, dynamic>> getProduct(String id) async {
-    return await _get('/products/$id');
-  }
-
-  // Measurement APIs
-  Future<Map<String, dynamic>> getMeasurements({
-    int page = 1,
-    int limit = 10,
-    String? customer,
-    String? category,
-  }) async {
-    return await _get(
-      '/measurements',
-      queryParams: {
-        'page': page,
-        'limit': limit,
-        'customer': customer,
-        'category': category,
-      },
-    );
-  }
-
-  Future<Map<String, dynamic>> getMeasurement(String id) async {
-    return await _get('/measurements/$id');
-  }
-
-  Future<Map<String, dynamic>> createMeasurement(
-      Map<String, dynamic> measurementData) async {
-    return await _post('/measurements', body: measurementData);
-  }
-
-  Future<Map<String, dynamic>> updateMeasurement(
-      String id, Map<String, dynamic> measurementData) async {
-    return await _put('/measurements/$id', body: measurementData);
-  }
-
-  // Order APIs
-  Future<Map<String, dynamic>> getOrders({
-    int page = 1,
-    int limit = 10,
-    String? search,
-    String? customer,
-    String? status,
-    String? priority,
-    String? startDate,
-    String? endDate,
-  }) async {
-    return await _get(
-      '/orders',
-      queryParams: {
-        'page': page,
-        'limit': limit,
-        'search': search,
-        'customer': customer,
-        'status': status,
-        'priority': priority,
-        'startDate': startDate,
-        'endDate': endDate,
-      },
-    );
-  }
-
-  Future<Map<String, dynamic>> getOrder(String orderId) async {
-    try {
-      print('Fetching order details for ID: $orderId');
-
-      // Handle any query parameters in the orderId
-      String endpoint = '/orders/';
-      if (orderId.contains('?')) {
-        final parts = orderId.split('?');
-        endpoint += parts[0];
-        endpoint += '?' + parts[1];
-      } else {
-        endpoint += orderId;
-        // Add a timestamp to prevent caching
-        endpoint += '?t=${DateTime.now().millisecondsSinceEpoch}';
-      }
-
-      final response = await _get(endpoint);
-      print('API response for order: $response');
-
-      // Check if we have a successful response
-      if (response['success'] == true && response['data'] != null) {
-        // Handle nested data structure (data: {success: true, data: {...}})
-        final data = response['data'];
-
-        // Check if data is nested within data
-        if (data is Map &&
-            data.containsKey('success') &&
-            data.containsKey('data') &&
-            data['data'] != null) {
-          print('Found nested data structure, extracting inner data');
-          // Extract the inner data object
-          final innerData = data['data'];
-
-          // Process the inner data
-          if (innerData is Map) {
-            // Ensure items array exists
-            if (!innerData.containsKey('items') || innerData['items'] == null) {
-              innerData['items'] = [];
-              print('No items found in order, creating empty array');
-            } else if (innerData['items'] is List &&
-                innerData['items'].isNotEmpty) {
-              print('Found ${innerData['items'].length} items in order');
-              // Process items (no need to change this part)
-            }
-
-            return {
-              'success': true,
-              'data': innerData,
-            };
-          }
-        }
-
-        // Original processing for non-nested data
-        // Ensure items array exists
-        if (!data.containsKey('items') || data['items'] == null) {
-          data['items'] = [];
-          print('No items found in order, creating empty array');
-        } else if (data['items'] is List && data['items'].isNotEmpty) {
-          // Process each item to ensure complete product information
-          List<dynamic> items = data['items'];
-          List<dynamic> enhancedItems = [];
-
-          for (int i = 0; i < items.length; i++) {
-            var item = items[i];
-
-            // If product is just an ID, fetch the full product details
-            if (item['product'] != null && item['product'] is String) {
-              String productId = item['product'];
-              print('Fetching details for product ID: $productId');
-
-              try {
-                final productResponse = await getProduct(productId);
-                if (productResponse['success'] &&
-                    productResponse['data'] != null) {
-                  // Replace the product ID with the full product object
-                  Map<String, dynamic> enhancedItem =
-                      Map<String, dynamic>.from(item);
-                  enhancedItem['product'] = productResponse['data'];
-                  print(
-                      'Enhanced item with product details: ${productResponse['data']['name']}');
-                  enhancedItems.add(enhancedItem);
-                } else {
-                  // If product fetch fails, keep original data but add a name
-                  Map<String, dynamic> enhancedItem =
-                      Map<String, dynamic>.from(item);
-                  if (!enhancedItem.containsKey('name')) {
-                    enhancedItem['name'] = 'Product #$productId';
-                  }
-                  if (!enhancedItem.containsKey('productName')) {
-                    enhancedItem['productName'] = 'Product #$productId';
-                  }
-                  print(
-                      'Could not fetch product details, using placeholder name');
-                  enhancedItems.add(enhancedItem);
-                }
-              } catch (e) {
-                print('Error fetching product details: $e');
-                enhancedItems.add(item); // Keep original item on error
-              }
-            } else {
-              // Keep items that already have product objects
-              enhancedItems.add(item);
-            }
-          }
-
-          // Replace the original items with enhanced items
-          data['items'] = enhancedItems;
-        }
-
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         return {
           'success': true,
           'data': data,
@@ -465,367 +144,652 @@ class ApiService {
       } else {
         return {
           'success': false,
-          'error': response['error'] ?? 'Failed to fetch order details',
+          'error': data['message'] ?? 'Failed to fetch data',
         };
       }
     } catch (e) {
-      print('Error fetching order: $e');
+      print('Error in GET request: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> post(String endpoint,
+      {Map<String, dynamic>? body,
+      bool requireAuth = true,
+      BuildContext? context}) async {
+    try {
+      print('POST request to: $baseUrl$endpoint');
+      if (body != null) {
+        print('Request body: $body');
+      }
+
+      final headers =
+          await _getHeaders(requireAuth: requireAuth, context: context);
+      print('Request headers: $headers');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      final data = jsonDecode(response.body);
+      print('Parsed response: $data');
+
+      if (response.statusCode == 401) {
+        if (context != null) {
+          // Clear token and redirect to login
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('token');
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/login', (route) => false);
+        }
+        return {'success': false, 'unauthorized': true};
+      }
+
+      return {
+        'success': response.statusCode >= 200 && response.statusCode < 300,
+        'data': data,
+        'error': data['message'] ?? 'Failed to create data',
+      };
+    } catch (e) {
+      print('Error in POST request: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> put(String endpoint,
+      {Map<String, dynamic>? body,
+      bool requireAuth = true,
+      BuildContext? context}) async {
+    try {
+      print('PUT request to: $baseUrl$endpoint');
+      if (body != null) {
+        print('Request body: $body');
+      }
+
+      final headers =
+          await _getHeaders(requireAuth: requireAuth, context: context);
+      print('Request headers: $headers');
+
+      final response = await http.put(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      final data = jsonDecode(response.body);
+      print('Parsed response: $data');
+
+      if (response.statusCode == 401) {
+        if (context != null) {
+          // Clear token and redirect to login
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('token');
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/login', (route) => false);
+        }
+        return {'success': false, 'unauthorized': true};
+      }
+
+      return {
+        'success': response.statusCode >= 200 && response.statusCode < 300,
+        'data': data,
+        'error': data['message'] ?? 'Failed to update data',
+      };
+    } catch (e) {
+      print('Error in PUT request: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> delete(String endpoint,
+      {bool requireAuth = true, BuildContext? context}) async {
+    try {
+      print('DELETE request to: $baseUrl$endpoint');
+
+      final headers =
+          await _getHeaders(requireAuth: requireAuth, context: context);
+      print('Request headers: $headers');
+
+      final response = await http.delete(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: headers,
+      );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      final data = jsonDecode(response.body);
+      print('Parsed response: $data');
+
+      if (response.statusCode == 401) {
+        if (context != null) {
+          // Clear token and redirect to login
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('token');
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/login', (route) => false);
+        }
+        return {'success': false, 'unauthorized': true};
+      }
+
+      return {
+        'success': response.statusCode >= 200 && response.statusCode < 300,
+        'data': data,
+        'error': data['message'] ?? 'Failed to delete data',
+      };
+    } catch (e) {
+      print('Error in DELETE request: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Auth APIs
+  Future<Map<String, dynamic>> register(Map<String, dynamic> userData,
+      {BuildContext? context}) async {
+    final result = await post('/users/register',
+        body: userData, requireAuth: false, context: context);
+    if (result['success']) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('token', result['data']['accessToken']);
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> login(String email, String password,
+      {BuildContext? context}) async {
+    try {
+      print('Attempting login with email: $email');
+      final response = await post('/users/login',
+          body: {'email': email, 'password': password},
+          requireAuth: false,
+          context: context);
+
+      print('Login response: $response');
+
+      // Check if the response indicates successful authentication
+      if (response['success'] &&
+          response['data'] != null &&
+          response['data']['accessToken'] != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('userData', jsonEncode(response['data']));
+        print('User data stored in SharedPreferences');
+
+        await prefs.setString('token', response['data']['accessToken']);
+        print(
+            'Token stored in SharedPreferences: ${response['data']['accessToken']}');
+
+        return response;
+      } else {
+        // If no token is present, treat as failed login
+        print('Login failed: No token in response');
+        return {
+          'success': false,
+          'error': response['error'] ?? 'Invalid credentials'
+        };
+      }
+    } catch (e) {
+      print('Error in login: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCurrentUser({BuildContext? context}) async {
+    try {
+      final response = await get('/users/profile', context: context);
+      print('Current user response: $response');
+
+      if (response['success'] == true && response['data'] != null) {
+        // Handle nested data structure
+        var userData = response['data'];
+        if (userData is Map && userData.containsKey('data')) {
+          userData = userData['data'];
+        }
+
+        return {'success': true, 'data': userData};
+      }
+
       return {
         'success': false,
-        'error': 'Exception: $e',
+        'error': response['error'] ?? 'Failed to fetch user profile'
+      };
+    } catch (e) {
+      print('Error fetching current user: $e');
+      return {'success': false, 'error': 'Error fetching user profile: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> logout({BuildContext? context}) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/logout'),
+        headers: await _getHeaders(),
+      );
+
+      return _handleResponse(response, context: context);
+    } catch (e) {
+      print('Logout error: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // Customer APIs
+  Future<Map<String, dynamic>> getCustomers(
+      {String? search, int? page, int? limit, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+        if (page != null) 'page': page.toString(),
+        if (limit != null) 'limit': limit.toString(),
+      };
+      return await get('/customers',
+          queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching customers: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCustomer(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/customers/$id', context: context);
+    } catch (e) {
+      print('Error fetching customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCustomerOrders(String customerId) async {
+    try {
+      final response = await get('/customers/$customerId/orders');
+      return response;
+    } catch (e) {
+      print('Error fetching customer orders: $e');
+      return {
+        'success': false,
+        'error': e.toString(),
       };
     }
   }
 
-  Future<Map<String, dynamic>> createOrder(
-      Map<String, dynamic> orderData) async {
+  Future<Map<String, dynamic>> createCustomer(Map<String, dynamic> customerData,
+      {BuildContext? context}) async {
     try {
-      print('Creating new order with total: ${orderData['totalAmount']}');
-
-      // Format items to ensure proper structure
-      if (orderData.containsKey('items') && orderData['items'] is List) {
-        List<dynamic> items = orderData['items'];
-        List<dynamic> formattedItems = [];
-
-        for (int i = 0; i < items.length; i++) {
-          var item = items[i];
-          Map<String, dynamic> formattedItem = Map<String, dynamic>.from(item);
-
-          // Handle product ID
-          if (item.containsKey('product')) {
-            if (item['product'] is Map) {
-              formattedItem['product'] = item['product']['_id'];
-            } else if (item['product'] is String) {
-              formattedItem['product'] = item['product'];
-            }
-          }
-
-          // Handle measurements - create a new measurement document first
-          if (item.containsKey('measurements') && item['measurements'] is Map) {
-            try {
-              // Create a new measurement document
-              final measurementData = {
-                'customer': orderData['customer'],
-                'category': item['product'] is Map
-                    ? item['product']['category']['_id']
-                    : null,
-                'values': item['measurements'],
-                'notes': item['notes'] ?? '',
-              };
-
-              final measurementResponse =
-                  await _post('/measurements', body: measurementData);
-
-              if (measurementResponse['success'] == true &&
-                  measurementResponse['data'] != null) {
-                // Use the new measurement ID
-                formattedItem['measurements'] =
-                    measurementResponse['data']['_id'];
-              } else {
-                print(
-                    'Failed to create measurement: ${measurementResponse['error']}');
-                formattedItem['measurements'] = null;
-              }
-            } catch (e) {
-              print('Error creating measurement: $e');
-              formattedItem['measurements'] = null;
-            }
-          }
-
-          // Remove any extra fields that shouldn't be sent to the API
-          formattedItem.remove('productName');
-          formattedItem.remove('productDescription');
-
-          // Ensure required fields
-          if (!formattedItem.containsKey('quantity')) {
-            formattedItem['quantity'] = 1;
-          }
-          if (!formattedItem.containsKey('price')) {
-            formattedItem['price'] = 0.0;
-          }
-
-          formattedItems.add(formattedItem);
-        }
-
-        // Update the items in orderData
-        orderData['items'] = formattedItems;
-      }
-
-      // Remove any extra fields from the order data
-      orderData.remove('createdBy');
-      orderData.remove('updatedBy');
-      orderData.remove('createdAt');
-      orderData.remove('updatedAt');
-      orderData.remove('__v');
-
-      // Call the API
-      final response = await _post('/orders', body: orderData);
-
-      // Log the response
-      print('Create order API response: ${json.encode(response)}');
-
-      if (response['success'] == true) {
-        // Handle nested response structure
-        var orderData = response['data'];
-        if (orderData is Map &&
-            orderData.containsKey('success') &&
-            orderData.containsKey('data')) {
-          orderData = orderData['data'];
-        }
-
-        if (orderData != null && orderData['_id'] != null) {
-          final orderId = orderData['_id'];
-          print('Order saved successfully with ID: $orderId');
-
-          // Get the full order details
-          final orderDetails = await getOrder(orderId);
-          return orderDetails;
-        } else {
-          print('Order ID not found in response');
-          return {
-            'success': false,
-            'error': 'Order ID not found in response',
-          };
-        }
-      }
-
-      return response;
+      return await post('/customers', body: customerData, context: context);
     } catch (e) {
-      print('Error in createOrder: $e');
+      print('Error creating customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCustomer(
+      String id, Map<String, dynamic> customerData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/customers/$id', body: customerData, context: context);
+    } catch (e) {
+      print('Error updating customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteCustomer(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/customers/$id', context: context);
+    } catch (e) {
+      print('Error deleting customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCustomerMeasurements(String customerId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/customers/$customerId/measurements', context: context);
+    } catch (e) {
+      print('Error fetching customer measurements: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> addCustomerMeasurement(
+      String customerId, Map<String, dynamic> measurementData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/customers/$customerId/measurements',
+          body: measurementData, context: context);
+    } catch (e) {
+      print('Error adding customer measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> removeCustomerMeasurement(
+      String customerId, String measurementId,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/customers/$customerId/measurements/$measurementId',
+          context: context);
+    } catch (e) {
+      print('Error removing customer measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Category APIs
+  Future<Map<String, dynamic>> getCategories(
+      {String? search, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+      };
+      return await get('/categories',
+          queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching categories: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCategory(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/categories/$id', context: context);
+    } catch (e) {
+      print('Error fetching category: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCategoryProducts(String categoryId) async {
+    return await get('/categories/$categoryId/products');
+  }
+
+  // Product APIs
+  Future<Map<String, dynamic>> getProducts(
+      {String? search, String? category, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+        if (category != null && category.isNotEmpty) 'category': category,
+      };
+      return await get('/products', queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching products: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getProduct(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/products/$id', context: context);
+    } catch (e) {
+      print('Error fetching product: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> createProduct(Map<String, dynamic> productData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/products', body: productData, context: context);
+    } catch (e) {
+      print('Error creating product: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateProduct(
+      String id, Map<String, dynamic> productData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/products/$id', body: productData, context: context);
+    } catch (e) {
+      print('Error updating product: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteProduct(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/products/$id', context: context);
+    } catch (e) {
+      print('Error deleting product: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Measurement APIs
+  Future<Map<String, dynamic>> getMeasurements(
+      {String? search, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+      };
+      return await get('/measurements',
+          queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching measurements: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getMeasurement(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/measurements/$id', context: context);
+    } catch (e) {
+      print('Error fetching measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> createMeasurement(
+      Map<String, dynamic> measurementData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/measurements',
+          body: measurementData, context: context);
+    } catch (e) {
+      print('Error creating measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateMeasurement(
+      String id, Map<String, dynamic> measurementData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/measurements/$id',
+          body: measurementData, context: context);
+    } catch (e) {
+      print('Error updating measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteMeasurement(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/measurements/$id', context: context);
+    } catch (e) {
+      print('Error deleting measurement: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Order APIs
+  Future<Map<String, dynamic>> getOrders(
+      {String? search, int? page, int? limit, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+        if (page != null) 'page': page.toString(),
+        if (limit != null) 'limit': limit.toString(),
+      };
+      return await get('/orders', queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching orders: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getOrderById(String orderId,
+      {BuildContext? context}) async {
+    print('=== Starting getOrderById ===');
+    print('Order ID: $orderId');
+
+    try {
+      final headers = await _getHeaders();
+      final uri = Uri.parse('$baseUrl/orders/$orderId');
+
+      print('Making GET request to: $uri');
+      print('Headers: $headers');
+
+      final response = await http.get(uri, headers: headers);
+      print('Response status code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 401) {
+        print('Unauthorized response received');
+        if (context != null) {
+          _handleUnauthorized(context);
+        }
+        return {'success': false, 'unauthorized': true};
+      }
+
+      final data = jsonDecode(response.body);
+      print('Parsed response data: $data');
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        print('Success response received');
+        return {
+          'success': true,
+          'data': data['data'] ?? data,
+        };
+      } else {
+        print('Error response received');
+        return {
+          'success': false,
+          'error': data['message'] ?? 'Failed to fetch order details',
+        };
+      }
+    } catch (e) {
+      print('=== Error in getOrderById ===');
+      print('Error details: $e');
+      print('Stack trace: ${StackTrace.current}');
       return {
         'success': false,
-        'error': 'Exception during order creation: $e',
+        'error': e.toString(),
       };
+    }
+  }
+
+  Future<Map<String, dynamic>> createOrder(Map<String, dynamic> orderData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/orders', body: orderData, context: context);
+    } catch (e) {
+      print('Error creating order: $e');
+      return {'success': false, 'error': e.toString()};
     }
   }
 
   Future<Map<String, dynamic>> updateOrder(
-      String id, Map<String, dynamic> orderData) async {
+      String id, Map<String, dynamic> orderData,
+      {BuildContext? context}) async {
     try {
-      print('=== UPDATE ORDER REQUEST ===');
-      print('Order ID: $id');
-      print('Original order data: ${json.encode(orderData)}');
-
-      // Ensure items have proper product IDs
-      if (orderData.containsKey('items') && orderData['items'] is List) {
-        List<dynamic> items = orderData['items'];
-        List<dynamic> formattedItems = [];
-
-        for (int i = 0; i < items.length; i++) {
-          var item = items[i];
-          print('\nProcessing item $i: ${json.encode(item)}');
-
-          Map<String, dynamic> formattedItem = Map<String, dynamic>.from(item);
-
-          // Handle product ID
-          if (item.containsKey('product')) {
-            if (item['product'] is Map) {
-              formattedItem['product'] = item['product']['_id'];
-              print(
-                  'Product is Map, extracted ID: ${formattedItem['product']}');
-            } else if (item['product'] is String) {
-              // Validate product ID exists
-              try {
-                final productResponse = await getProduct(item['product']);
-                if (!productResponse['success']) {
-                  print('Product not found, skipping item');
-                  continue; // Skip this item if product doesn't exist
-                }
-                formattedItem['product'] = item['product'];
-                print('Product is String ID: ${formattedItem['product']}');
-              } catch (e) {
-                print('Error validating product: $e');
-                continue; // Skip this item if validation fails
-              }
-            }
-          }
-
-          // Handle measurements
-          if (item.containsKey('measurements')) {
-            if (item['measurements'] is Map) {
-              // If measurements is a map, create a new measurement
-              try {
-                final measurementData = {
-                  'customer': orderData['customer'],
-                  'category': item['product'] is Map
-                      ? item['product']['category']['_id']
-                      : null,
-                  'values': item['measurements'],
-                  'notes': item['notes'] ?? '',
-                };
-
-                final measurementResponse =
-                    await _post('/measurements', body: measurementData);
-
-                if (measurementResponse['success'] == true &&
-                    measurementResponse['data'] != null) {
-                  formattedItem['measurements'] =
-                      measurementResponse['data']['_id'];
-                  print(
-                      'Created new measurement: ${formattedItem['measurements']}');
-                } else {
-                  print('Failed to create measurement, setting to null');
-                  formattedItem['measurements'] = null;
-                }
-              } catch (e) {
-                print('Error creating measurement: $e');
-                formattedItem['measurements'] = null;
-              }
-            } else if (item['measurements'] is String) {
-              formattedItem['measurements'] = item['measurements'];
-              print(
-                  'Measurements is String ID: ${formattedItem['measurements']}');
-            }
-          }
-
-          // Remove any extra fields that shouldn't be sent to the API
-          formattedItem.remove('productName');
-          formattedItem.remove('productDescription');
-
-          // Ensure required fields
-          if (!formattedItem.containsKey('quantity')) {
-            formattedItem['quantity'] = 1;
-          }
-          if (!formattedItem.containsKey('price')) {
-            formattedItem['price'] = 0.0;
-          }
-
-          print('Formatted item: ${json.encode(formattedItem)}');
-          formattedItems.add(formattedItem);
-        }
-
-        // If no valid items remain, return error
-        if (formattedItems.isEmpty) {
-          return {
-            'success': false,
-            'error': 'No valid items to update',
-          };
-        }
-
-        // Update the items in orderData
-        orderData['items'] = formattedItems;
-      }
-
-      // Remove any extra fields from the order data
-      orderData.remove('customer');
-      orderData.remove('createdBy');
-      orderData.remove('updatedBy');
-      orderData.remove('createdAt');
-      orderData.remove('updatedAt');
-      orderData.remove('__v');
-
-      print('\nFinal order data being sent: ${json.encode(orderData)}');
-
-      // Call the API
-      final response = await _put('/orders/$id', body: orderData);
-
-      print('\nAPI Response: ${json.encode(response)}');
-
-      // If successful, get the updated order details to ensure everything is synced
-      if (response['success'] == true) {
-        final updatedOrder = await getOrder(id);
-        print('\nRetrieved updated order: ${updatedOrder['data'] != null}');
-        print('Updated order data: ${json.encode(updatedOrder['data'])}');
-
-        if (updatedOrder['success'] == true) {
-          return {
-            'success': true,
-            'data': updatedOrder['data'],
-          };
-        }
-      }
-
-      return response;
+      return await put('/orders/$id', body: orderData, context: context);
     } catch (e) {
-      print('Error in updateOrder: $e');
-      return {
-        'success': false,
-        'error': 'Exception during order update: $e',
-      };
+      print('Error updating order: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteOrder(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/orders/$id', context: context);
+    } catch (e) {
+      print('Error deleting order: $e');
+      return {'success': false, 'error': e.toString()};
     }
   }
 
   Future<Map<String, dynamic>> updateOrderStatus(
-      String id, String status) async {
-    return await _put('/orders/$id/status', body: {'status': status});
+      String orderId, String itemId, String status,
+      {BuildContext? context}) async {
+    try {
+      final response = await put('/orders/$orderId/status',
+          body: {'orderId': orderId, 'itemId': itemId, 'newStatus': status},
+          context: context);
+
+      // Ensure success is always a boolean
+      return {
+        'success': response['success'] == true,
+        'data': response['data'],
+        'error': response['error'],
+        'unauthorized': response['unauthorized'] == true
+      };
+    } catch (e) {
+      print('Error updating order status: $e');
+      return {'success': false, 'error': e.toString()};
+    }
   }
 
-  // Create a test order with sample items (for debugging)
-  Future<Map<String, dynamic>> createTestOrder() async {
+  Future<Map<String, dynamic>> getCustomerById(String id,
+      {BuildContext? context}) async {
     try {
-      // First get a customer to assign to the order
-      final customersResult = await getCustomers(limit: 1);
-      if (!customersResult['success'] ||
-          customersResult['data'] == null ||
-          (customersResult['data'] is List &&
-              customersResult['data'].isEmpty)) {
-        return {'success': false, 'error': 'No customers available'};
-      }
+      return await get('/customers/$id', context: context);
+    } catch (e) {
+      print('Error fetching customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
 
-      String customerId = '';
-      if (customersResult['data'] is List) {
-        customerId = customersResult['data'][0]['_id'];
-      } else if (customersResult['data'] is Map &&
-          customersResult['data']['data'] is List) {
-        customerId = customersResult['data']['data'][0]['_id'];
-      }
+  Future<Map<String, dynamic>> getBusinessById(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$id', context: context);
+    } catch (e) {
+      print('Error fetching business: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
 
-      if (customerId.isEmpty) {
-        return {'success': false, 'error': 'Could not get customer ID'};
-      }
-
-      // Next get a product to add to the order
-      final productsResult = await getProducts(limit: 1);
-      if (!productsResult['success'] ||
-          productsResult['data'] == null ||
-          (productsResult['data'] is List && productsResult['data'].isEmpty)) {
-        return {'success': false, 'error': 'No products available'};
-      }
-
-      String productId = '';
-      if (productsResult['data'] is List) {
-        productId = productsResult['data'][0]['_id'];
-      } else if (productsResult['data'] is Map &&
-          productsResult['data']['data'] is List) {
-        productId = productsResult['data']['data'][0]['_id'];
-      }
-
-      if (productId.isEmpty) {
-        return {'success': false, 'error': 'Could not get product ID'};
-      }
-
-      // Create a test order with these IDs
+  Future<Map<String, dynamic>> createTestOrder({BuildContext? context}) async {
+    try {
+      // Create a test order with sample data
       final orderData = {
-        'customer': customerId,
+        'customer': null, // Will be filled by the backend with a test customer
         'items': [
           {
-            'product': productId,
-            'quantity': 2,
-            'price': 99.99,
-            'notes': 'Test item 1 - added for debugging',
-          },
-          {
-            'product': productId,
+            'product':
+                null, // Will be filled by the backend with a test product
             'quantity': 1,
-            'price': 149.99,
-            'notes': 'Test item 2 - added for debugging',
+            'price': 1000,
+            'notes': 'Test order item'
           }
         ],
         'status': 'New',
-        'totalAmount': 349.97,
+        'priority': 'Medium',
+        'notes': 'Test order created from app',
         'dueDate':
             DateTime.now().add(const Duration(days: 7)).toIso8601String(),
-        'priority': 'Medium',
-        'notes': 'Test order created for debugging',
       };
 
-      print('Creating test order with data: $orderData');
-      final result = await createOrder(orderData);
-
-      return result;
+      return await post('/orders/test', body: orderData, context: context);
     } catch (e) {
       print('Error creating test order: $e');
-      return {'success': false, 'error': 'Error creating test order: $e'};
+      return {'success': false, 'error': e.toString()};
     }
   }
 
@@ -839,43 +803,43 @@ class ApiService {
     String? startDate,
     String? endDate,
   }) async {
-    return await _get(
+    return await get(
       '/invoices',
       queryParams: {
-        'page': page,
-        'limit': limit,
-        'search': search,
-        'customer': customer,
-        'status': status,
-        'startDate': startDate,
-        'endDate': endDate,
+        'page': page.toString(),
+        'limit': limit.toString(),
+        if (search != null) 'search': search,
+        if (customer != null) 'customer': customer,
+        if (status != null) 'status': status,
+        if (startDate != null) 'startDate': startDate,
+        if (endDate != null) 'endDate': endDate,
       },
     );
   }
 
   Future<Map<String, dynamic>> getInvoice(String id) async {
-    return await _get('/invoices/$id');
+    return await get('/invoices/$id');
   }
 
   Future<Map<String, dynamic>> createInvoice(
       Map<String, dynamic> invoiceData) async {
-    return await _post('/invoices', body: invoiceData);
+    return await post('/invoices', body: invoiceData);
   }
 
   Future<Map<String, dynamic>> updateInvoice(
       String id, Map<String, dynamic> invoiceData) async {
-    return await _put('/invoices/$id', body: invoiceData);
+    return await put('/invoices/$id', body: invoiceData);
   }
 
   Future<Map<String, dynamic>> addPayment(
       String invoiceId, Map<String, dynamic> paymentData) async {
-    return await _post('/invoices/$invoiceId/payments', body: paymentData);
+    return await post('/invoices/$invoiceId/payments', body: paymentData);
   }
 
   // Generic API request handler with authentication
   Future<Map<String, dynamic>> _getWithAuth(String endpoint,
       {Map<String, dynamic>? queryParams}) async {
-    return await _get(endpoint, queryParams: queryParams, requireAuth: true);
+    return await get(endpoint, queryParams: queryParams, requireAuth: true);
   }
 
   // Get order with detailed item information
@@ -884,7 +848,7 @@ class ApiService {
       print('Fetching detailed order items for ID: $orderId');
 
       // First get the basic order to ensure it exists
-      final orderResponse = await _get('/orders/$orderId');
+      final orderResponse = await get('/orders/$orderId');
 
       if (!orderResponse['success'] || orderResponse['data'] == null) {
         return orderResponse; // Return error if order doesn't exist
@@ -1001,6 +965,273 @@ class ApiService {
         'success': false,
         'error': 'Exception: $e',
       };
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinesses(
+      {String? search, BuildContext? context}) async {
+    try {
+      final queryParams = {
+        if (search != null && search.isNotEmpty) 'search': search,
+      };
+      return await get('/businesses',
+          queryParams: queryParams, context: context);
+    } catch (e) {
+      print('Error fetching businesses: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusiness(String id,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$id', context: context);
+    } catch (e) {
+      print('Error fetching business: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> createBusiness(Map<String, dynamic> businessData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/businesses', body: businessData, context: context);
+    } catch (e) {
+      print('Error creating business: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBusiness(
+      String id, Map<String, dynamic> businessData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/businesses/$id', body: businessData, context: context);
+    } catch (e) {
+      print('Error updating business: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteBusiness(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/businesses/$id', context: context);
+    } catch (e) {
+      print('Error deleting business: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessOrders(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/orders', context: context);
+    } catch (e) {
+      print('Error fetching business orders: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessProducts(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/products', context: context);
+    } catch (e) {
+      print('Error fetching business products: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessCategories(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/categories', context: context);
+    } catch (e) {
+      print('Error fetching business categories: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessMeasurements(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/measurements',
+          context: context);
+    } catch (e) {
+      print('Error fetching business measurements: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessReports(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/reports', context: context);
+    } catch (e) {
+      print('Error fetching business reports: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessAnalytics(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/analytics', context: context);
+    } catch (e) {
+      print('Error fetching business analytics: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessDashboard(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/dashboard', context: context);
+    } catch (e) {
+      print('Error fetching business dashboard: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessNotifications(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/notifications',
+          context: context);
+    } catch (e) {
+      print('Error fetching business notifications: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessActivities(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/activities', context: context);
+    } catch (e) {
+      print('Error fetching business activities: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessUsers(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/users', context: context);
+    } catch (e) {
+      print('Error fetching business users: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> addBusinessUser(String businessId, String userId,
+      {BuildContext? context}) async {
+    try {
+      return await post('/businesses/$businessId/users',
+          body: {'userId': userId}, context: context);
+    } catch (e) {
+      print('Error adding business user: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> removeBusinessUser(
+      String businessId, String userId,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/businesses/$businessId/users/$userId',
+          context: context);
+    } catch (e) {
+      print('Error removing business user: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessCustomers(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/customers', context: context);
+    } catch (e) {
+      print('Error fetching business customers: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> addBusinessCustomer(
+      String businessId, String customerId,
+      {BuildContext? context}) async {
+    try {
+      return await post('/businesses/$businessId/customers',
+          body: {'customerId': customerId}, context: context);
+    } catch (e) {
+      print('Error adding business customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> removeBusinessCustomer(
+      String businessId, String customerId,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/businesses/$businessId/customers/$customerId',
+          context: context);
+    } catch (e) {
+      print('Error removing business customer: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getBusinessSettings(String businessId,
+      {BuildContext? context}) async {
+    try {
+      return await get('/businesses/$businessId/settings', context: context);
+    } catch (e) {
+      print('Error fetching business settings: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBusinessSettings(
+      String businessId, Map<String, dynamic> settingsData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/businesses/$businessId/settings',
+          body: settingsData, context: context);
+    } catch (e) {
+      print('Error updating business settings: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> createCategory(Map<String, dynamic> categoryData,
+      {BuildContext? context}) async {
+    try {
+      return await post('/categories', body: categoryData, context: context);
+    } catch (e) {
+      print('Error creating category: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCategory(
+      String id, Map<String, dynamic> categoryData,
+      {BuildContext? context}) async {
+    try {
+      return await put('/categories/$id', body: categoryData, context: context);
+    } catch (e) {
+      print('Error updating category: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteCategory(String id,
+      {BuildContext? context}) async {
+    try {
+      return await delete('/categories/$id', context: context);
+    } catch (e) {
+      print('Error deleting category: $e');
+      return {'success': false, 'error': e.toString()};
     }
   }
 }

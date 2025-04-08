@@ -28,7 +28,7 @@ const orderItemSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['New', 'In Progress', 'Ready', 'Urgent', 'Completed', 'Cancelled'],
+        enum: ['New', 'In Progress', 'Ready', 'Partially Ready', 'Completed', 'Cancelled'],
         default: 'New',
     },
     completedAt: {
@@ -51,7 +51,7 @@ const orderSchema = new mongoose.Schema(
         items: [orderItemSchema],
         status: {
             type: String,
-            enum: ['New', 'In Progress', 'Ready', 'Urgent', 'Completed', 'Cancelled'],
+            enum: ['New', 'In Progress', 'Ready', 'Partially Ready', 'Completed', 'Cancelled'],
             default: 'New',
         },
         totalAmount: {

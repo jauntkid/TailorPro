@@ -111,11 +111,10 @@ const logoutUser = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const getUserProfile = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.id);
-
+    // req.user is already populated by the protect middleware
     res.status(200).json({
         success: true,
-        data: user,
+        data: req.user,
     });
 });
 

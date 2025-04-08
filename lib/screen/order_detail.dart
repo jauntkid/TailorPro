@@ -13,6 +13,7 @@ class OrderItem {
   final int quantity;
   final double price;
   final IconData icon;
+  final String status;
 
   OrderItem({
     required this.id,
@@ -21,6 +22,7 @@ class OrderItem {
     required this.quantity,
     required this.price,
     required this.icon,
+    this.status = 'New',
   });
 }
 
@@ -78,10 +80,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Delay fetch until after the widget is built
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchOrderDetails();
-    });
   }
 
   @override
@@ -102,15 +100,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   @override
-  void didChangeDependencies() async {
+  void didChangeDependencies() {
     super.didChangeDependencies();
-    print('didChangeDependencies called in OrderDetailScreen');
-
     if (!_detailsFetched) {
+      print('=== OrderDetailScreen didChangeDependencies ===');
       final args = ModalRoute.of(context)?.settings.arguments;
-      print('Order detail arguments: $args');
+      print('Route arguments: $args');
 
       if (args is Map<String, dynamic> && args.containsKey('id')) {
+        print('Found order ID in arguments');
         setState(() {
           _orderId = args['id'];
           print('Order ID set: $_orderId');
@@ -121,263 +119,127 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           shouldRefresh = args['shouldRefresh'] ?? false;
           print('Should refresh flag: $shouldRefresh');
         }
-      }
 
-      // Fetch the order details now that we have an ID
-      if (_orderId.isNotEmpty) {
-        print('Fetching order details for ID: $_orderId');
-        await _fetchOrderDetails();
-      }
+        // Fetch the order details now that we have an ID
+        if (_orderId.isNotEmpty) {
+          print('Initiating order details fetch for ID: $_orderId');
+          _fetchOrderDetails();
+        } else {
+          print('Warning: Empty order ID received');
+        }
 
-      _detailsFetched = true;
+        _detailsFetched = true;
+      } else {
+        print('Warning: No order ID found in arguments');
+      }
     }
   }
 
   Future<void> _fetchOrderDetails() async {
-    if (!mounted) return;
+    print('=== Starting _fetchOrderDetails ===');
+    print('Order ID: $_orderId');
+    print('Current loading state: $_isLoading');
+
+    if (!mounted) {
+      print('Widget not mounted, skipping fetch');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
-      // Clear existing order items to avoid duplication
-      _orderItems.clear();
     });
 
     try {
-      // Get the order ID from arguments if available
-      final dynamic args = ModalRoute.of(context)?.settings.arguments;
+      print('Calling API service to fetch order details...');
+      final result = await _apiService.getOrderById(_orderId, context: context);
+      print('API response received: $result');
 
-      print('Order detail raw arguments: $args');
-
-      // Handle both string argument and map argument formats
-      if (args is String) {
-        _orderId = args; // Direct string argument (from bill.dart)
-        print('Order ID from direct string argument: $_orderId');
-      } else if (args is Map<String, dynamic>) {
-        if (args.containsKey('id')) {
-          _orderId = args['id'];
-        } else if (args.containsKey('orderId')) {
-          _orderId = args['orderId'];
-        }
-
-        // Check for shouldRefresh flag
-        if (args.containsKey('shouldRefresh')) {
-          shouldRefresh = args['shouldRefresh'] ?? false;
-          print('Setting shouldRefresh flag to: $shouldRefresh');
-        }
-
-        print('Order ID from map argument: $_orderId');
-      } else {
-        print(
-            'Warning: Unknown argument type for order details: ${args?.runtimeType}');
+      if (!mounted) {
+        print('Widget not mounted after API call, skipping state update');
+        return;
       }
 
-      // If we have a valid order ID, fetch from API
-      if (_orderId.isNotEmpty) {
-        print('Fetching order details for ID: $_orderId');
-        // Force a fresh fetch from the server by adding a timestamp
-        final result = await _apiService
-            .getOrder('$_orderId?t=${DateTime.now().millisecondsSinceEpoch}');
-        print('Order API result success: ${result['success']}');
+      if (result['success']) {
+        print('Successfully fetched order details');
+        final orderData = result['data'];
+        print('Order data: $orderData');
 
-        if (result['success'] && result['data'] != null) {
-          final orderData = result['data'];
-          print('Order data received: ${orderData.keys}');
+        final customerData = orderData['customer'] ?? {};
+        final items = orderData['items'] ?? [];
+        print('Customer data: $customerData');
+        print('Items count: ${items.length}');
 
-          if (orderData['items'] != null) {
-            print('Items count: ${orderData['items'].length}');
-          } else {
-            print('No items in the order data');
-          }
+        // Get customer name and image
+        String customerName = 'Unknown Customer';
+        String customerImage = 'https://randomuser.me/api/portraits/men/32.jpg';
 
-          // Extract customer information
-          String customerName = 'Unknown Customer';
-          String customerImage =
-              'https://randomuser.me/api/portraits/men/1.jpg';
-          String customerPhone = '';
-
-          // Extract customer data from order
-          if (orderData['customer'] != null) {
-            print('Customer data type: ${orderData['customer'].runtimeType}');
-            if (orderData['customer'] is Map) {
-              // Customer is an object
-              customerName = orderData['customer']['name'] ?? customerName;
-              customerImage = orderData['customer']['image'] ?? customerImage;
-              customerPhone = orderData['customer']['phone'] ?? '';
-              print(
-                  'Customer from object: $customerName, Phone: $customerPhone');
-            } else if (orderData['customer'] is String) {
-              // Customer is an ID, try to load customer details
-              print('Customer is an ID: ${orderData['customer']}');
-              try {
-                final customerResult =
-                    await _apiService.getCustomerById(orderData['customer']);
-                if (customerResult['success'] &&
-                    customerResult['data'] != null) {
-                  final customerData = customerResult['data'];
-                  customerName = customerData['name'] ?? customerName;
-                  customerImage = customerData['image'] ?? customerImage;
-                  customerPhone = customerData['phone'] ?? '';
-                  print(
-                      'Fetched customer details: $customerName, Phone: $customerPhone');
-                }
-              } catch (e) {
-                print('Error fetching customer details: $e');
-              }
-            }
-          } else {
-            print('No customer data in order');
-          }
-
-          // Extract items from order
-          List<OrderItem> items = [];
-          if (orderData['items'] != null && orderData['items'] is List) {
-            final itemsList = orderData['items'] as List;
-            print('Processing ${itemsList.length} items');
-
-            for (var item in itemsList) {
-              print('Processing item: ${item.keys}');
-              String productName = 'Unknown Product';
-              String productDescription = '';
-
-              // Extract product data (could be a string ID or an object)
-              if (item['product'] != null) {
-                print('Product data type: ${item['product'].runtimeType}');
-                if (item['product'] is Map) {
-                  // Product is an object
-                  productName = item['product']['name'] ?? productName;
-                  productDescription = item['product']['description'] ?? '';
-                  print('Product from object: $productName');
-                } else if (item['product'] is String) {
-                  // Product is an ID - check if we have a name in the item
-                  if (item.containsKey('productName')) {
-                    productName = item['productName'] ?? productName;
-                    print('Product from ID with productName: $productName');
-                  } else if (item.containsKey('name')) {
-                    productName = item['name'] ?? productName;
-                    print('Product from ID with name: $productName');
-                  } else {
-                    productName = 'Product #${item['product']}';
-                    print('Using default product ID as name: $productName');
-                  }
-                }
-              } else {
-                print('No product data in item');
-              }
-
-              // Check for product description in item
-              if (productDescription.isEmpty) {
-                if (item.containsKey('description')) {
-                  productDescription = item['description'] ?? '';
-                } else if (item.containsKey('notes')) {
-                  productDescription = item['notes'] ?? '';
-                }
-              }
-
-              // Get price - try different possible fields
-              double price = 0.0;
-              if (item.containsKey('price') && item['price'] is num) {
-                price = item['price'].toDouble();
-              } else if (item.containsKey('unitPrice') &&
-                  item['unitPrice'] is num) {
-                price = item['unitPrice'].toDouble();
-              }
-
-              // Get quantity
-              int quantity = 1;
-              if (item.containsKey('quantity') && item['quantity'] is num) {
-                quantity = item['quantity'];
-              }
-
-              items.add(OrderItem(
-                id: item['_id'] ?? '',
-                name: productName,
-                description: productDescription,
-                quantity: quantity,
-                price: price,
-                icon: _getIconForProduct(productName),
-              ));
-              print('Added item: $productName with price $price');
-            }
-          } else {
-            print('No items found in order data or invalid format');
-          }
-
-          // Parse checklist items if available
-          _updateChecklistBasedOnStatus(orderData['status'] ?? 'New');
-
-          // Update state with order data
-          setState(() {
-            _orderNumber = orderData['orderNumber'] ?? '';
-            _customerName = customerName;
-            _customerImage = customerImage;
-            _dueDate = _formatDate(orderData['dueDate']);
-            _itemCount = items.length;
-            _status = orderData['status'] ?? 'New';
-            _priority = orderData['priority'] ?? 'Medium';
-            _notes = orderData['notes'] ?? '';
-            _orderItems.clear();
-            _orderItems.addAll(items);
-            _totalAmount = (orderData['totalAmount'] is num)
-                ? orderData['totalAmount'].toDouble()
-                : 0.0;
-
-            print('Order items count after processing: ${_orderItems.length}');
-            print('Total amount: $_totalAmount');
-          });
-
-          // Handle empty items - attempt to fetch detailed data if needed
-          if (_orderItems.isEmpty) {
-            print('No items found, attempting to fetch detailed data');
-            await _fetchDetailedOrderItems();
-          }
-
-          print('Order details updated in state');
-        } else {
-          print('Failed to fetch order: ${result['error']}');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['error'] ?? 'Failed to load order details'),
-              backgroundColor: AppTheme.accentColor,
-            ),
-          );
+        if (customerData is Map) {
+          customerName = customerData['name'] ?? 'Unknown Customer';
+          customerImage = customerData['profileImage'] ?? customerImage;
         }
-      }
-      // If no ID, use demo data or show placeholder
-      else {
-        // For demo purposes, just using some dummy data
+
+        print('Updating state with order data...');
         setState(() {
-          _orderNumber = 'ORD12345';
-          _customerName = 'John Doe';
-          _dueDate = '15 April 2023';
-          _itemCount = 2;
-          _status = 'In Progress';
-          _priority = 'High';
-          _notes = 'Please deliver ASAP';
-          _orderItems.add(
-            OrderItem(
-              id: '1',
-              name: 'Custom Shirt',
-              description: 'Blue cotton shirt with custom collar',
-              quantity: 1,
-              price: 1200.0,
-              icon: Icons.dry_cleaning,
-            ),
-          );
-          _orderItems.add(
-            OrderItem(
-              id: '2',
-              name: 'Formal Pants',
-              description: 'Black formal pants with pleats',
-              quantity: 1,
-              price: 1500.0,
-              icon: Icons.accessibility_new,
-            ),
-          );
-          _totalAmount = 2700.0;
+          _orderNumber = orderData['orderNumber'] ?? '';
+          _customerName = customerName;
+          _customerImage = customerImage;
+          _dueDate = _formatDate(orderData['dueDate']);
+          _itemCount = items.length;
+          _status = orderData['status'] ?? 'New';
+          _priority = orderData['priority'] ?? 'Medium';
+          _notes = orderData['notes'] ?? '';
+          _orderItems.clear();
+
+          // Convert API items to OrderItem objects
+          for (var item in items) {
+            _orderItems.add(OrderItem(
+              id: item['_id'] ?? '',
+              name: item['product'] != null && item['product'] is Map
+                  ? item['product']['name'] ?? 'Unknown Product'
+                  : 'Unknown Product',
+              description: item['notes'] ?? '',
+              quantity:
+                  (item['quantity'] is num) ? item['quantity'].toInt() : 1,
+              price: (item['price'] is num) ? item['price'].toDouble() : 0.0,
+              icon: _getIconForProduct(
+                  item['product'] != null && item['product'] is Map
+                      ? item['product']['name'] ?? 'Unknown Product'
+                      : 'Unknown Product'),
+              status: item['status'] ?? 'New',
+            ));
+          }
+
+          _totalAmount = (orderData['totalAmount'] is num)
+              ? orderData['totalAmount'].toDouble()
+              : 0.0;
+          _isLoading = false;
         });
+        print('State updated successfully');
+
+        // Handle empty items - attempt to fetch detailed data if needed
+        if (_orderItems.isEmpty) {
+          print('No items found, attempting to fetch detailed order items...');
+          await _fetchDetailedOrderItems();
+        }
+      } else {
+        print('Failed to fetch order details');
+        if (!result['unauthorized']) {
+          print('Error message: ${result['error']}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content:
+                    Text(result['error'] ?? 'Failed to load order details'),
+                backgroundColor: AppTheme.accentColor,
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
-      print('Error fetching order details: $e');
+      print('=== Error in _fetchOrderDetails ===');
+      print('Error details: $e');
+      print('Stack trace: ${StackTrace.current}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -388,6 +250,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       }
     } finally {
       if (mounted) {
+        print('Setting loading state to false');
         setState(() {
           _isLoading = false;
         });
@@ -461,6 +324,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             quantity: itemQty,
             price: itemPrice,
             icon: _getIconForProduct(itemName),
+            status: item['status'] ?? 'New',
           ));
         }
 
@@ -495,6 +359,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               quantity: 1,
               price: _totalAmount,
               icon: Icons.shopping_bag,
+              status: 'New',
             ));
           } else {
             // If we don't even have a total amount
@@ -506,6 +371,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               quantity: 1,
               price: 0.0,
               icon: Icons.help_outline,
+              status: 'New',
             ));
             _totalAmount = 0.0;
           }
@@ -526,6 +392,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             quantity: 1,
             price: _totalAmount > 0 ? _totalAmount : 0.0,
             icon: Icons.error_outline,
+            status: 'New',
           ));
           _itemCount = 1;
         });
@@ -617,176 +484,270 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   void _handleNavTap(int index) {
     print('Navigation tapped in order_detail: $index');
 
-    // Don't navigate if already on the selected page
-    if (index == _currentNavIndex) {
-      print('Already on this page, not navigating');
-      return;
-    }
-
-    setState(() {
-      _currentNavIndex = index;
-    });
-
     // Get the route from the AppBottomNav
     final String route = AppBottomNav.getRouteForIndex(index);
     print('Navigating to route: $route');
 
     // Navigate to the selected route and clear the navigation stack
-    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
+    Navigator.pushNamedAndRemoveUntil(context, route, (r) => false,
+        arguments: {'shouldRefresh': true});
   }
 
   void _navigateToProfile() {
     Navigator.pushNamed(context, '/user_page');
   }
 
-  Future<void> _updateOrderStatus(String newStatus) async {
-    // Show loading indicator
-    setState(() {
-      _isLoading = true;
-    });
+  String _getNextStatus() {
+    switch (_status) {
+      case 'New':
+        return 'In Progress';
+      case 'In Progress':
+        // Check if all items are ready
+        bool allItemsReady = true;
+        for (var item in _orderItems) {
+          if (item.status != 'Ready') {
+            allItemsReady = false;
+            break;
+          }
+        }
+        return allItemsReady ? 'Ready' : 'Partially Ready';
+      case 'Partially Ready':
+        // Check if all items are ready
+        bool allItemsReady = true;
+        for (var item in _orderItems) {
+          if (item.status != 'Ready') {
+            allItemsReady = false;
+            break;
+          }
+        }
+        return allItemsReady ? 'Ready' : 'Partially Ready';
+      case 'Ready':
+        // Only allow completion after payment
+        return 'Completed';
+      default:
+        return _status;
+    }
+  }
 
-    try {
-      // Check if we're moving from Ready to Completed - ask for payment confirmation
-      if (_status == 'Ready' && newStatus == 'Completed') {
-        setState(() {
-          _isLoading = false;
-        });
-
-        // Show payment confirmation dialog
-        final bool? isPaid = await showDialog<bool>(
-          context: context,
-          builder: (BuildContext context) {
+  Future<bool?> _showItemReadinessDialog() async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
             return AlertDialog(
-              backgroundColor: AppTheme.cardBackground,
-              title: const Text('Payment Confirmation',
-                  style: AppTheme.headingMedium),
-              content: const Text(
-                'Has the customer paid for this order?',
-                style: AppTheme.bodyRegular,
+              title: const Text('Mark Items as Ready'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: _orderItems.map((item) {
+                    return CheckboxListTile(
+                      title: Text(item.name),
+                      subtitle: Text('Quantity: ${item.quantity}'),
+                      value: item.status == 'Ready',
+                      onChanged: (bool? value) {
+                        setState(() {
+                          // Create a new OrderItem with updated status
+                          final updatedItem = OrderItem(
+                            id: item.id,
+                            name: item.name,
+                            description: item.description,
+                            quantity: item.quantity,
+                            price: item.price,
+                            icon: item.icon,
+                            status: value == true ? 'Ready' : 'In Progress',
+                          );
+                          // Update the item in the list
+                          final index = _orderItems.indexOf(item);
+                          _orderItems[index] = updatedItem;
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('No',
-                      style: TextStyle(color: AppTheme.textSecondary)),
+                  child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                  ),
                   onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Yes'),
+                  child: const Text('Save'),
                 ),
               ],
             );
           },
         );
+      },
+    );
+  }
 
-        // If dialog was dismissed, return early
-        if (isPaid == null) return;
+  Future<void> _updateOrderStatus(String newStatus, String itemId) async {
+    if (_orderId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order ID is missing')),
+      );
+      return;
+    }
 
-        // If not paid, show options to send bill or show QR
-        if (!isPaid) {
-          final String? action = await showDialog<String>(
-            context: context,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                backgroundColor: AppTheme.cardBackground,
-                title: const Text('Payment Required',
-                    style: AppTheme.headingMedium),
-                content: const Text(
-                  'Would you like to send an invoice or display a payment QR code?',
-                  style: AppTheme.bodyRegular,
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, 'cancel'),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: AppTheme.textSecondary)),
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                    ),
-                    onPressed: () => Navigator.pop(context, 'invoice'),
-                    child: const Text('Send Invoice'),
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                    ),
-                    onPressed: () => Navigator.pop(context, 'qr'),
-                    child: const Text('Show QR Code'),
-                  ),
-                ],
+    // Show readiness dialog when transitioning to Ready
+    if (newStatus == 'Ready' && _status == 'In Progress') {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Item Readiness'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: _orderItems.map((item) {
+              return CheckboxListTile(
+                title: Text(item.name),
+                value: item.status == 'Ready',
+                onChanged: (bool? value) {
+                  setState(() {
+                    // Update the item's status in the list
+                    final index = _orderItems.indexOf(item);
+                    _orderItems[index] = OrderItem(
+                      id: item.id,
+                      name: item.name,
+                      description: item.description,
+                      quantity: item.quantity,
+                      price: item.price,
+                      icon: item.icon,
+                      status: value == true ? 'Ready' : 'In Progress',
+                    );
+                  });
+                },
               );
-            },
-          );
-
-          if (action == 'invoice') {
-            _navigateToBill();
-            return;
-          } else if (action == 'qr') {
-            _showPaymentQR();
-            return;
-          } else {
-            // User canceled
-            return;
-          }
-        }
-
-        // If we're here, user confirmed payment was made - set loading back to true
-        setState(() {
-          _isLoading = true;
-        });
-      }
-
-      // Continue with normal status update
-      // If we have a valid order ID, update via API
-      if (_orderId.isNotEmpty) {
-        final result = await _apiService.updateOrderStatus(_orderId, newStatus);
-
-        if (result['success']) {
-          // Update local state
-          setState(() {
-            _status = newStatus;
-            _updateChecklistBasedOnStatus(newStatus);
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Order status updated to $newStatus'),
-              backgroundColor: AppTheme.statusInProgress,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['error'] ?? 'Failed to update order status'),
-              backgroundColor: AppTheme.accentColor,
-            ),
-          );
-        }
-      } else {
-        // Demo mode - just update locally
-        setState(() {
-          _status = newStatus;
-          _updateChecklistBasedOnStatus(newStatus);
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Demo: Order status updated to $newStatus'),
-            backgroundColor: AppTheme.statusInProgress,
+            }).toList(),
           ),
-        );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        return;
       }
+    }
+
+    // Confirm payment when transitioning to Completed status
+    if (newStatus == 'Completed') {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Payment'),
+          content: const Text('Has the customer paid for this order?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yes'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        return;
+      }
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Update the specific item's status first
+      final result = await _apiService.updateOrderStatus(
+        _orderId,
+        itemId,
+        newStatus,
+      );
+
+      if (!result['success']) {
+        throw Exception(result['error'] ?? 'Failed to update item status');
+      }
+
+      // Calculate new order status based on updated item statuses
+      String newOrderStatus;
+      bool allCompleted = true;
+      bool allReady = true;
+      bool hasReady = false;
+      bool hasInProgress = false;
+
+      // Update local state to reflect the new item status
+      setState(() {
+        final itemIndex = _orderItems.indexWhere((item) => item.id == itemId);
+        if (itemIndex != -1) {
+          _orderItems[itemIndex] = OrderItem(
+            id: _orderItems[itemIndex].id,
+            name: _orderItems[itemIndex].name,
+            description: _orderItems[itemIndex].description,
+            quantity: _orderItems[itemIndex].quantity,
+            price: _orderItems[itemIndex].price,
+            icon: _orderItems[itemIndex].icon,
+            status: newStatus,
+          );
+        }
+      });
+
+      // Check all items' statuses
+      for (var item in _orderItems) {
+        if (item.status != 'Completed') allCompleted = false;
+        if (item.status != 'Ready') allReady = false;
+        if (item.status == 'Ready' || item.status == 'Completed')
+          hasReady = true;
+        if (item.status == 'In Progress') hasInProgress = true;
+      }
+
+      // Determine the new order status
+      if (allCompleted) {
+        newOrderStatus = 'Completed';
+      } else if (allReady) {
+        newOrderStatus = 'Ready';
+      } else if (hasReady) {
+        newOrderStatus = 'Partially Ready';
+      } else if (hasInProgress) {
+        newOrderStatus = 'In Progress';
+      } else {
+        newOrderStatus = 'New';
+      }
+
+      // Update the order status with additional tags
+      final orderUpdateResult = await _apiService.updateOrder(
+        _orderId,
+        {
+          'status': newOrderStatus,
+          'isPaid': newStatus == 'Completed',
+          'tags': [
+            if (_priority == 'High') 'Urgent',
+            if (newStatus == 'Completed') 'Paid' else 'Unpaid',
+          ],
+        },
+      );
+
+      if (!orderUpdateResult['success']) {
+        throw Exception(
+            orderUpdateResult['error'] ?? 'Failed to update order status');
+      }
+
+      // Refresh order details to get the latest status
+      await _fetchOrderDetails();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating status: $e'),
-          backgroundColor: AppTheme.accentColor,
-        ),
+        SnackBar(content: Text('Error: $e')),
       );
     } finally {
       setState(() {
@@ -867,19 +828,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         _fetchOrderDetails();
       }
     });
-  }
-
-  String _getNextStatus() {
-    switch (_status) {
-      case 'New':
-        return 'In Progress';
-      case 'In Progress':
-        return 'Ready';
-      case 'Ready':
-        return 'Completed';
-      default:
-        return 'Completed';
-    }
   }
 
   Color _getStatusButtonColor() {
@@ -967,7 +915,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               onPressed: () {
                 Navigator.pop(context);
                 // After successful payment, update the status to Completed
-                _updateOrderStatus('Completed');
+                _updateOrderStatus('Completed', '');
               },
               child: const Text('Payment Received'),
             ),
@@ -975,6 +923,58 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         );
       },
     );
+  }
+
+  // Add a method to show item status selection dialog
+  Future<void> _showItemStatusDialog(OrderItem item) async {
+    final String? newStatus = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Update Status for ${item.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('New'),
+              onTap: () => Navigator.pop(context, 'New'),
+            ),
+            ListTile(
+              title: const Text('In Progress'),
+              onTap: () => Navigator.pop(context, 'In Progress'),
+            ),
+            ListTile(
+              title: const Text('Ready'),
+              onTap: () => Navigator.pop(context, 'Ready'),
+            ),
+            ListTile(
+              title: const Text('Completed'),
+              onTap: () => Navigator.pop(context, 'Completed'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (newStatus != null) {
+      await _updateOrderStatus(newStatus, item.id);
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'new':
+        return AppTheme.statusInProgress;
+      case 'in progress':
+        return AppTheme.statusInProgress;
+      case 'ready':
+        return AppTheme.statusReady;
+      case 'completed':
+        return AppTheme.statusCompleted;
+      case 'partially ready':
+        return AppTheme.statusReady;
+      default:
+        return AppTheme.textSecondary;
+    }
   }
 
   @override
@@ -1025,12 +1025,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
                             // Order Notes Card
                             _buildOrderNotesCard(),
-
-                            const SizedBox(height: AppTheme.paddingLarge),
-
-                            // Status Update Button (not shown if completed)
-                            if (_status != 'Completed')
-                              _buildStatusUpdateButton(),
 
                             const SizedBox(height: AppTheme.paddingLarge),
                           ],
@@ -1182,8 +1176,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     children: [
                       ...List.generate(
                         _orderItems.length,
-                        (index) => _buildOrderItemRow(_orderItems[index],
-                            index != _orderItems.length - 1),
+                        (index) => _buildOrderItem(_orderItems[index]),
                       ),
                       const Divider(color: AppTheme.dividerColor),
                       // Total price
@@ -1212,88 +1205,90 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     );
   }
 
-  Widget _buildOrderItemRow(OrderItem item, bool showDivider) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppTheme.paddingSmall),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: AppTheme.secondary.withOpacity(0.2),
-                  borderRadius:
-                      BorderRadius.circular(AppTheme.borderRadiusSmall),
-                ),
-                child: Center(
-                  child: Icon(
-                    item.icon,
-                    size: 36,
-                    color: AppTheme.textSecondary,
+  Widget _buildOrderItem(OrderItem item) {
+    return Card(
+      color: AppTheme.cardBackground,
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.paddingMedium),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left side - Item details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: AppTheme.headingSmall,
                   ),
-                ),
-              ),
-              const SizedBox(width: AppTheme.paddingMedium),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.name,
-                      style: AppTheme.bodyLarge
-                          .copyWith(fontWeight: FontWeight.w500),
-                    ),
+                  if (item.description.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
                       item.description,
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Qty: ${item.quantity}',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 16,
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w400,
-                      ),
+                      style: AppTheme.bodyRegular,
                     ),
                   ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '₹${item.price.toStringAsFixed(2)}',
-                    style: AppTheme.bodyLarge
-                        .copyWith(fontWeight: FontWeight.w500),
-                  ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Per piece',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w400,
-                    ),
+                  Text(
+                    'Quantity: ${item.quantity} • ₹${item.price.toStringAsFixed(2)}',
+                    style: AppTheme.bodyRegular,
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+            // Right side - Status dropdown
+            const SizedBox(width: AppTheme.paddingMedium),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: _getStatusColor(item.status).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _getStatusColor(item.status).withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: DropdownButton<String>(
+                value: item.status,
+                icon: Icon(
+                  Icons.arrow_drop_down,
+                  color: _getStatusColor(item.status),
+                ),
+                underline: const SizedBox(),
+                style: TextStyle(
+                  color: _getStatusColor(item.status),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: const [
+                  DropdownMenuItem<String>(
+                    value: 'New',
+                    child: Text('New'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'In Progress',
+                    child: Text('In Progress'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'Ready',
+                    child: Text('Ready'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'Completed',
+                    child: Text('Completed'),
+                  ),
+                ],
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    _updateOrderStatus(newValue, item.id);
+                  }
+                },
+              ),
+            ),
+          ],
         ),
-        if (showDivider) const Divider(color: AppTheme.dividerColor),
-      ],
+      ),
     );
   }
 
@@ -1425,70 +1420,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ),
                   ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusUpdateButton() {
-    final nextStatus = _getNextStatus();
-    final buttonColor = _getStatusButtonColor();
-    final buttonIcon = _getStatusButtonIcon();
-
-    String buttonText;
-
-    switch (_status) {
-      case 'New':
-        buttonText = 'Start Working';
-        break;
-      case 'In Progress':
-        buttonText = 'Mark as Ready';
-        break;
-      case 'Ready':
-        buttonText = 'Mark as Completed';
-        break;
-      default:
-        buttonText = 'Update Status';
-    }
-
-    return ElevatedButton(
-      onPressed: () => _updateOrderStatus(nextStatus),
-      style: ElevatedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
-        ),
-      ),
-      child: Ink(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [buttonColor, buttonColor.withOpacity(0.8)],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-          borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
-        ),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                buttonText,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: AppTheme.paddingSmall),
-              Icon(buttonIcon, color: Colors.white),
-            ],
-          ),
         ),
       ),
     );

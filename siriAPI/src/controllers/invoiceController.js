@@ -247,16 +247,22 @@ const deleteInvoice = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const addPayment = asyncHandler(async (req, res) => {
-    const { amount, method, date, transactionId, notes } = req.body;
+    const { amount, method, date, transactionId, notes, status } = req.body;
 
-    if (!amount || !method) {
-        throw new ErrorResponse('Amount and payment method are required', 400);
+    if (!amount || !method || !transactionId) {
+        throw new ErrorResponse('Amount, payment method, and transaction ID are required', 400);
     }
 
     const invoice = await Invoice.findById(req.params.id);
 
     if (!invoice) {
         throw new ErrorResponse(`Invoice not found with id of ${req.params.id}`, 404);
+    }
+
+    // Check if transaction ID already exists
+    const existingPayment = invoice.payments.find(p => p.transactionId === transactionId);
+    if (existingPayment) {
+        throw new ErrorResponse('Transaction ID already exists', 400);
     }
 
     // Create payment object
@@ -266,14 +272,74 @@ const addPayment = asyncHandler(async (req, res) => {
         date: date || Date.now(),
         transactionId,
         notes,
-        recordedBy: req.user.id
+        status: status || 'Pending',
+        recordedBy: req.user.id,
+        verification: {
+            verified: false,
+            verifiedBy: null,
+            verifiedAt: null,
+            notes: null,
+        }
     };
 
     // Add payment to invoice
     invoice.payments.push(payment);
 
     // Update amount paid and balance
-    invoice.amountPaid = invoice.payments.reduce((total, payment) => total + payment.amount, 0);
+    invoice.amountPaid = invoice.payments
+        .filter(p => p.status === 'Completed')
+        .reduce((total, payment) => total + payment.amount, 0);
+    invoice.balance = invoice.totalAmount - invoice.amountPaid;
+
+    // Update status based on payment
+    if (invoice.balance <= 0) {
+        invoice.status = 'Paid';
+    } else if (invoice.amountPaid > 0) {
+        invoice.status = 'Partially Paid';
+    }
+
+    await invoice.save();
+
+    res.status(200).json({
+        success: true,
+        data: invoice
+    });
+});
+
+/**
+ * @desc    Verify payment
+ * @route   PUT /api/invoices/:id/payments/:paymentId/verify
+ * @access  Private
+ */
+const verifyPayment = asyncHandler(async (req, res) => {
+    const { verified, notes } = req.body;
+
+    const invoice = await Invoice.findById(req.params.id);
+
+    if (!invoice) {
+        throw new ErrorResponse(`Invoice not found with id of ${req.params.id}`, 404);
+    }
+
+    // Find payment
+    const payment = invoice.payments.id(req.params.paymentId);
+
+    if (!payment) {
+        throw new ErrorResponse(`Payment not found with id of ${req.params.paymentId}`, 404);
+    }
+
+    // Update verification details
+    payment.verification.verified = verified;
+    payment.verification.verifiedBy = req.user.id;
+    payment.verification.verifiedAt = new Date();
+    payment.verification.notes = notes;
+
+    // Update payment status
+    payment.status = verified ? 'Completed' : 'Failed';
+
+    // Update amount paid and balance
+    invoice.amountPaid = invoice.payments
+        .filter(p => p.status === 'Completed')
+        .reduce((total, payment) => total + payment.amount, 0);
     invoice.balance = invoice.totalAmount - invoice.amountPaid;
 
     // Update status based on payment
@@ -341,5 +407,6 @@ module.exports = {
     updateInvoice,
     deleteInvoice,
     addPayment,
+    verifyPayment,
     removePayment
 }; 
