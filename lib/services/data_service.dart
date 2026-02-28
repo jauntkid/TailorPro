@@ -66,49 +66,15 @@ class DataService extends ChangeNotifier {
   String _shopUpi = '';
   List<String> _garmentTypes = [
     'Shirt',
-    'Trouser',
-    'Suit',
-    'Sherwani',
-    'Kurta',
-    'Blouse',
-    'Lehenga',
-    'Saree Blouse',
-    'Dress',
+    'Pant',
   ];
   Map<String, double> _garmentDefaults = {
     'Shirt': 500,
-    'Trouser': 400,
-    'Suit': 3500,
-    'Sherwani': 5000,
-    'Kurta': 600,
-    'Blouse': 450,
-    'Lehenga': 8000,
-    'Saree Blouse': 500,
-    'Dress': 1500,
+    'Pant': 400,
   };
   Map<String, List<String>> _garmentMeasurements = {
     'Shirt': ['Chest', 'Shoulder', 'Sleeve Length', 'Shirt Length', 'Neck'],
-    'Trouser': ['Waist', 'Hip', 'Inseam', 'Outseam'],
-    'Suit': [
-      'Chest',
-      'Shoulder',
-      'Sleeve Length',
-      'Jacket Length',
-      'Waist',
-      'Hip'
-    ],
-    'Sherwani': [
-      'Chest',
-      'Shoulder',
-      'Sleeve Length',
-      'Sherwani Length',
-      'Neck'
-    ],
-    'Kurta': ['Chest', 'Shoulder', 'Sleeve Length', 'Kurta Length', 'Neck'],
-    'Blouse': ['Bust', 'Shoulder', 'Sleeve Length', 'Blouse Length'],
-    'Lehenga': ['Waist', 'Hip', 'Lehenga Length'],
-    'Saree Blouse': ['Bust', 'Shoulder', 'Sleeve Length', 'Blouse Length'],
-    'Dress': ['Bust', 'Waist', 'Hip', 'Dress Length', 'Shoulder'],
+    'Pant': ['Waist', 'Hip', 'Inseam', 'Outseam'],
   };
   String _measurementUnit = 'inches';
 

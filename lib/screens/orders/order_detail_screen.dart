@@ -46,40 +46,47 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final order = ds.getOrderById(widget.orderId);
     if (order == null) return;
 
-    // If completing, check for pending payment
+    // If completing and has pending payment, show payment options
     if (status == OrderStatus.completed && order.balanceAmount > 0) {
       final paymentAction = await _showPaymentCheckDialog(order);
       if (paymentAction == null) return; // user cancelled
+
+      if (paymentAction == 'reminder') {
+        // Send WhatsApp payment reminder
+        setState(() => _sendingNotification = true);
+        final log = await ds.sendWhatsAppNotification(
+            widget.orderId, WhatsAppNotificationType.paymentLink);
+        if (mounted) {
+          setState(() => _sendingNotification = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(log.delivered
+                    ? '✓ Payment reminder sent via WhatsApp'
+                    : '✗ Failed to send reminder')),
+          );
+        }
+        return; // Don't change status
+      }
+
       if (paymentAction == 'record') {
-        // Show payment dialog and wait for it, then check again
+        // Show payment dialog and wait for it
         await _showAddPaymentDialogAsync(order);
         final updatedOrder = ds.getOrderById(widget.orderId);
         if (updatedOrder == null) return;
         if (updatedOrder.balanceAmount > 0) {
-          // Still has balance, ask if they want to proceed anyway
-          final proceed = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              icon: Icon(Icons.warning_amber_rounded,
-                  size: 36, color: Theme.of(context).colorScheme.error),
-              title: const Text('Pending Balance'),
-              content: Text(
-                  '₹${updatedOrder.balanceAmount.toStringAsFixed(0)} is still due. Complete order anyway?'),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel')),
-                FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Complete Anyway'),
-                ),
-              ],
-            ),
-          );
-          if (proceed != true) return;
+          // Still has balance — stay as ready, don't complete
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    '₹${updatedOrder.balanceAmount.toStringAsFixed(0)} still due. Order remains as ${updatedOrder.status.label}.'),
+              ),
+            );
+          }
+          return;
         }
+        // Balance is 0 — fall through to complete
       }
-      // paymentAction == 'proceed' → continue without collecting
     }
 
     String? tailorName;
@@ -94,8 +101,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     }
     // Auto-send WhatsApp status notification to customer
-    final updatedOrder = ds.getOrderById(widget.orderId);
-    if (updatedOrder != null && updatedOrder.customer.phone.isNotEmpty) {
+    final updatedOrder2 = ds.getOrderById(widget.orderId);
+    if (updatedOrder2 != null && updatedOrder2.customer.phone.isNotEmpty) {
       final type =
           status == OrderStatus.readyForTrial || status == OrderStatus.completed
               ? WhatsAppNotificationType.orderReady
@@ -113,19 +120,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           icon: Icon(Icons.payment_rounded, size: 36, color: cs.primary),
           title: const Text('Payment Pending'),
           content: Text(
-            '₹${order.balanceAmount.toStringAsFixed(0)} balance is due for this order.\n\nWould you like to record the payment before completing?',
+            '₹${order.balanceAmount.toStringAsFixed(0)} balance is due for this order.\n\nRecord the payment or send a reminder to the customer.',
           ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancel')),
-            OutlinedButton(
-              onPressed: () => Navigator.pop(ctx, 'proceed'),
-              child: const Text('Complete Without Payment'),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'reminder'),
+              icon: const Icon(Icons.send_rounded, size: 18),
+              label: const Text('Send Reminder'),
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed: () => Navigator.pop(ctx, 'record'),
-              child: const Text('Record Payment'),
+              icon: const Icon(Icons.payment_rounded, size: 18),
+              label: const Text('Record Payment'),
             ),
           ],
         );

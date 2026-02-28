@@ -82,10 +82,14 @@ class _GodukaanAppState extends State<GodukaanApp> {
     }
   }
 
-  Future<void> _initDataService(String storeId) async {
+  Future<void> _initDataService(String storeId, {String? storeName}) async {
     _dataService?.dispose();
     final ds = DataService(storeId: storeId);
     await ds.init();
+    // Set shop name from store name if this is a fresh setup
+    if (storeName != null && ds.shopName == 'Godukaan') {
+      ds.updateShopDetails(name: storeName);
+    }
     NotificationService.instance.attach(ds);
     if (mounted) {
       setState(() {
@@ -97,7 +101,7 @@ class _GodukaanAppState extends State<GodukaanApp> {
   }
 
   void _onStoreReady(Store store) {
-    _initDataService(store.id);
+    _initDataService(store.id, storeName: store.name);
   }
 
   @override
