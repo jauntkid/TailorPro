@@ -1,128 +1,120 @@
 import 'package:flutter/material.dart';
-import '../config/theme.dart';
+import 'package:intl/intl.dart';
+import '../models/order.dart';
+import 'status_badge.dart';
 
 class OrderCard extends StatelessWidget {
-  final String customerName;
-  final String orderNumber;
-  final String items;
-  final String dueDate;
-  final double price;
-  final String status;
-  final VoidCallback onTap;
-  final String currencySymbol;
+  final Order order;
+  final VoidCallback? onTap;
 
-  const OrderCard({
-    Key? key,
-    required this.customerName,
-    required this.orderNumber,
-    required this.items,
-    required this.dueDate,
-    required this.price,
-    required this.status,
-    required this.onTap,
-    this.currencySymbol = '\$',
-  }) : super(key: key);
+  const OrderCard({super.key, required this.order, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppTheme.paddingMedium),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBackground,
-        borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.borderRadiusMedium),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(AppTheme.paddingMedium),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      customerName,
-                      style: AppTheme.bodyLarge,
-                    ),
-                    _buildStatusBadge(status),
-                  ],
-                ),
-                const SizedBox(height: AppTheme.paddingSmall),
-                Text(
-                  orderNumber,
-                  style: AppTheme.bodySmall,
-                ),
-                const SizedBox(height: AppTheme.paddingSmall),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '$items • Due $dueDate',
-                        style: AppTheme.bodySmall,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$currencySymbol${price.toStringAsFixed(2)}',
-                  style: AppTheme.bodyLarge.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.primary,
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-          ),
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final overdue = order.status != OrderStatus.completed &&
+        order.status != OrderStatus.cancelled &&
+        order.dueDate.isBefore(DateTime.now());
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: order.status.color.withValues(alpha: 0.25),
+          width: 1,
         ),
       ),
-    );
-  }
-
-  Widget _buildStatusBadge(String status) {
-    Color backgroundColor;
-    Color textColor;
-
-    switch (status) {
-      case 'In Progress':
-        backgroundColor = AppTheme.statusInProgressBg;
-        textColor = AppTheme.statusInProgress;
-        break;
-      case 'Ready':
-        backgroundColor = AppTheme.statusReadyBg;
-        textColor = AppTheme.statusReady;
-        break;
-      case 'Urgent':
-        backgroundColor = const Color(0x33E5E7EB);
-        textColor = const Color(0xFFDC2626);
-        break;
-      default:
-        backgroundColor = Colors.grey.withOpacity(0.2);
-        textColor = Colors.grey;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.paddingMedium,
-        vertical: 4,
+      color: Color.lerp(
+        Theme.of(context).cardColor,
+        order.status.color,
+        0.04,
       ),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(9999),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 12,
-          fontFamily: 'Inter',
-          fontWeight: FontWeight.w400,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (order.isUrgent) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'URGENT',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.redAccent,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: Text(
+                            order.customer.name,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  StatusBadge(status: order.status),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${order.orderNumber}  ·  ${order.itemsSummary}',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: cs.onSurface.withValues(alpha: 0.5)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.calendar_today_rounded,
+                    size: 12,
+                    color: overdue
+                        ? cs.error
+                        : cs.onSurface.withValues(alpha: 0.35),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    DateFormat('MMM d').format(order.dueDate),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: overdue
+                          ? cs.error
+                          : cs.onSurface.withValues(alpha: 0.5),
+                      fontWeight: overdue ? FontWeight.w600 : null,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '₹${order.totalAmount.toStringAsFixed(0)}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

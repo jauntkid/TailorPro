@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "38208849148",
+    "project_id": "mydarzi-app",
+    "storage_bucket": "mydarzi-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:38208849148:android:5b34e38d5dfe03c32c8379",
+        "android_client_info": {
+          "package_name": "com.mydarzi.godarzi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAs9VlhLLUMKUTvc8mK_9WmwHhBwo7UhjI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
